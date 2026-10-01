@@ -35,7 +35,6 @@ function yawXZ(x, z, yaw) {
 }
 
 const RAIL = 0xc43238;
-const RAIL_HI = 0xe15a52;
 const RUNG = 0x9a241c;
 const FRAME = 0x8b97a6;
 const FRAME_DK = 0x66717f;
@@ -75,13 +74,13 @@ export function draw(canvas, st) {
   const s = st.specs;
   followX = st.x;
 
-  const zCam = Math.max(3.05, s.plateW * 0.5 + 0.95);
-  const eye = [followX, 0.62, zCam];
-  const target = [followX, 0.4, 0];
+  const zCam = Math.max(3.8, s.plateW * 0.42 + 1.5);
+  const eye = [followX, 2.85, zCam];
+  const target = [followX, 0.12, 0];
   const zaxis = norm(sub(eye, target));
   const xaxis = norm(cross([0, 1, 0], zaxis));
   const yaxis = cross(zaxis, xaxis);
-  const fov = 0.62;
+  const fov = 0.72;
   const fLen = h / 2 / Math.tan(fov / 2);
   const cam = { eye, xaxis, yaxis, zaxis, fLen, w, h };
   const NEAR = 0.16;
@@ -216,15 +215,17 @@ export function draw(canvas, st) {
   const bx = st.x;
   const spin = -st.x / 0.062;
 
-  add(
-    [
-      [x0, 0, -1.6],
-      [x1, 0, -1.6],
-      [x1, 0, 1.6],
-      [x0, 0, 1.6],
-    ],
-    0x10151c
-  );
+  for (let gz = -1.4; gz < 1.5; gz += 0.28) {
+    add(
+      [
+        [x0, 0, gz],
+        [x1, 0, gz],
+        [x1, 0, gz + 0.28],
+        [x0, 0, gz + 0.28],
+      ],
+      0x10151c
+    );
+  }
 
   for (const z of [-gauge / 2, gauge / 2]) {
     const seg = 0.42;
@@ -234,14 +235,13 @@ export function draw(canvas, st) {
       if (a1 - a0 < 0.05) continue;
       const mid = (a0 + a1) / 2;
       wheel([mid, railY, z], "x", railR, a1 - a0, RAIL, 0, false);
-      wheel([mid, railY + railR * 0.45, z], "x", railR * 0.28, (a1 - a0) * 0.92, RAIL_HI, 0, false);
     }
   }
 
-  for (let x = Math.floor(x0 * 2) / 2; x < x1; x += 0.34) {
+  for (let x = Math.floor(x0 * 2) / 2; x < x1; x += 0.38) {
     if (x < 0.05 || x > s.track - 0.05) continue;
-    if (Math.abs(x - bx) < 0.46) continue;
-    wheel([x, railY, 0], "z", 0.028, gauge - 0.02, RUNG, 0, false);
+    if (Math.abs(x - bx) < 0.5) continue;
+    wheel([x, railY - 0.012, 0], "z", 0.02, gauge - railR * 2 - 0.02, RUNG, 0, false);
   }
 
   if (x0 < 0.08 && x1 > 0) box(0.04, railY + 0.08, 0, 0.04, 0.22, gauge + 0.08, 0, STOP);
@@ -252,42 +252,46 @@ export function draw(canvas, st) {
   const span0 = Math.max(0, x0);
   const span1 = Math.min(s.track, x1);
   if (span1 > span0) {
-    box((span0 + span1) / 2, railY - 0.045, 0, span1 - span0, 0.028, 0.09, 0, STEEL);
-    for (let x = Math.ceil(span0 / 0.14) * 0.14; x < span1; x += 0.14) {
-      if (Math.abs(x - bx) < 0.22) continue;
-      box(x, railY - 0.02, 0, 0.045, 0.03, 0.07, 0, TOOTH);
-    }
+    const mid = (span0 + span1) / 2;
+    const len = span1 - span0;
+    box(mid, railY, 0, len, 0.032, 0.055, 0, 0xc5d2df);
   }
 
-  const topR = 0.064;
-  const sideR = 0.04;
-  const botR = 0.05;
-  const topY = railY + railR + topR * 0.92;
-  const botY = railY - railR - botR * 0.92;
+  const topR = 0.058;
+  const sideR = 0.032;
+  const botR = 0.042;
+  const topY = railY + railR + topR;
+  const botY = railY - railR - botR;
+  const axles = [-0.26, 0.26];
 
   for (const z of [-gauge / 2, gauge / 2]) {
     const side = z > 0 ? 1 : -1;
-    const inboard = z - side * 0.045;
-    box(bx, topY + 0.02, z, 0.62, 0.02, 0.04, 0, FRAME);
-    box(bx, railY - 0.01, inboard, 0.62, 0.018, 0.02, 0, FRAME_DK);
-    for (const dx of [-0.22, 0.22]) {
-      wheel([bx + dx, topY, z], "z", topR, 0.03, WHEEL, spin, true);
-      wheel([bx + dx, topY, z], "z", topR * 1.08, 0.01, FRAME_DK, spin, false);
-      wheel([bx + dx, topY, z], "z", 0.02, 0.034, HUB, spin, false);
-      wheel([bx + dx, botY, z + side * 0.01], "z", botR, 0.026, WHEEL, spin, true);
-      wheel([bx + dx, botY, z + side * 0.01], "z", 0.016, 0.03, HUB, spin, false);
-      box(bx + dx, (topY + botY) / 2, inboard, 0.028, topY - botY, 0.02, 0, FRAME);
+    const fz = z - side * 0.07;
+    box(bx, topY, fz, 0.64, 0.016, 0.014, 0, FRAME);
+    box(bx, botY, fz, 0.64, 0.014, 0.012, 0, FRAME);
+    box(bx, railY, fz, 0.5, 0.012, 0.012, 0, FRAME_DK);
+    for (const dx of axles) {
+      box(bx + dx, (topY + botY) / 2, fz, 0.014, topY - botY + 0.02, 0.012, 0, FRAME);
+      box(bx + dx, topY, (z + fz) / 2, 0.016, 0.016, Math.abs(z - fz), 0, FRAME_DK);
+      box(bx + dx, botY, (z + fz) / 2, 0.014, 0.014, Math.abs(z - fz), 0, FRAME_DK);
+      wheel([bx + dx, topY, z], "z", topR, 0.026, WHEEL, spin, true);
+      wheel([bx + dx, topY, z], "z", 0.018, 0.03, HUB, spin, false);
+      wheel([bx + dx, botY, z], "z", botR, 0.022, WHEEL, spin, true);
+      wheel([bx + dx, botY, z], "z", 0.014, 0.026, HUB, spin, false);
     }
     for (const dx of [-0.06, 0.06]) {
-      const sz = z + side * (railR + sideR * 0.2);
-      wheel([bx + dx, railY, sz], "y", sideR, 0.03, WHEEL, spin * 0.5, false);
-      wheel([bx + dx, railY, sz], "y", sideR * 0.45, 0.034, HUB, 0, false);
+      const sz = z + side * (railR + sideR);
+      wheel([bx + dx, railY, sz], "y", sideR, 0.018, WHEEL, spin * 0.4, false);
+      box(bx + dx, railY, (sz + fz) / 2, 0.012, 0.012, Math.abs(sz - fz), 0, FRAME_DK);
     }
   }
 
-  const deckY = topY + 0.07;
-  box(bx, deckY, 0, 0.22, 0.04, gauge - 0.12, 0, FRAME);
-  box(bx, deckY - 0.02, 0, 0.5, 0.028, 0.08, 0, FRAME_DK);
+  box(bx - 0.26, topY + 0.035, 0, 0.016, 0.016, gauge - 0.14, 0, FRAME);
+  box(bx + 0.26, topY + 0.035, 0, 0.016, 0.016, gauge - 0.14, 0, FRAME);
+  box(bx, topY + 0.055, 0, 0.62, 0.016, 0.03, 0, FRAME);
+
+  const deckY = topY + 0.1;
+  box(bx, deckY, 0, 0.24, 0.02, 0.2, 0, FRAME);
 
   const generating = st.inst > 30;
   const motoring = st.inst < -30;
