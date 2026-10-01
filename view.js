@@ -74,13 +74,14 @@ export function draw(canvas, st) {
   const s = st.specs;
   followX = st.x;
 
-  const zCam = Math.max(3.425, s.plateW * 0.46 + 1.225);
-  const eye = [followX, 1.735, zCam];
-  const target = [followX, 0.26, 0];
+  const sailTop = 0.75 + s.plateH;
+  const zCam = Math.max(9.2, s.plateW * 0.5 + 6.4);
+  const eye = [followX - 1.35, sailTop + 1.15, zCam];
+  const target = [followX + 0.35, sailTop * 0.36, 0];
   const zaxis = norm(sub(eye, target));
   const xaxis = norm(cross([0, 1, 0], zaxis));
   const yaxis = cross(zaxis, xaxis);
-  const fov = 0.67;
+  const fov = 1.08;
   const fLen = h / 2 / Math.tan(fov / 2);
   const cam = { eye, xaxis, yaxis, zaxis, fLen, w, h };
   const NEAR = 0.16;
@@ -329,8 +330,6 @@ export function draw(canvas, st) {
     const [ox, oz] = yawXZ(0, end * (s.plateW / 2 - 0.015), yaw);
     box(bx + ox, midY, oz, 0.028, s.plateH, 0.03, yaw, PLATE_EDGE);
   }
-  const [rx, rz] = yawXZ(0, 0.22, yaw);
-  box(bx + rx, py0 + s.plateH * 0.28, rz, 0.02, s.plateH * 0.5, 0.025, yaw, PLATE_EDGE);
 
   polys.sort((a, b) => b.z - a.z);
   for (const poly of polys) {
