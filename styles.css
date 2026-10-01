@@ -1,0 +1,304 @@
+:root {
+  color-scheme: dark;
+  font-size: 112.5%;
+  --bg: #0a0e14;
+  --surface: #121a24;
+  --surface-2: #1a2533;
+  --text: #e8edf4;
+  --muted: #7d8fa3;
+  --accent: #3d9cf5;
+  --green: #34d399;
+  --amber: #fbbf24;
+  --red: #f87171;
+  --border: rgba(255, 255, 255, 0.08);
+  --app-gap: 0.4rem;
+  --vv-top: 0px;
+  --vv-left: 0px;
+  --vv-w: 100vw;
+  --vv-h: 100svh;
+  --pwa-fill-h: 100%;
+  --pwa-extra-b: 0px;
+  --safe-b: env(safe-area-inset-bottom, 0px);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "DM Sans", system-ui, sans-serif;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  touch-action: manipulation;
+}
+
+html.pwa-standalone,
+html.pwa-standalone body {
+  height: calc(var(--pwa-fill-h, 100%) + var(--pwa-extra-b, 0px));
+  min-height: calc(var(--pwa-fill-h, 100%) + var(--pwa-extra-b, 0px));
+  max-height: none;
+}
+
+.fit-stage {
+  position: fixed;
+  top: var(--vv-top, 0px);
+  left: var(--vv-left, 0px);
+  width: var(--vv-w, 100vw);
+  height: var(--vv-h, 100svh);
+  right: auto;
+  bottom: auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  padding:
+    max(0px, env(safe-area-inset-top, 0px))
+    max(0.2rem, env(safe-area-inset-right, 0px))
+    0
+    max(0.2rem, env(safe-area-inset-left, 0px));
+}
+
+html.pwa-standalone .fit-stage {
+  top: 0;
+  left: 0;
+  right: 0;
+  width: 100%;
+  height: calc(var(--pwa-fill-h, 100%) + var(--pwa-extra-b, 0px));
+}
+
+.app {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--app-gap);
+  padding: 0.2rem 0.45rem 0;
+}
+
+header {
+  flex: 0 0 auto;
+  text-align: center;
+}
+
+header h1 {
+  font-family: "Michroma", system-ui, sans-serif;
+  font-size: 1.15rem;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  line-height: 1.1;
+}
+
+.build {
+  margin-top: 0.12rem;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 0.62rem;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+
+.stage-wrap {
+  flex: 1 1 auto;
+  min-height: 8rem;
+  position: relative;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #0c1118;
+  border: 1px solid var(--border);
+}
+
+#view {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.track-map {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 8px;
+  height: 8px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.track-map i {
+  position: absolute;
+  top: -3px;
+  width: 14px;
+  height: 14px;
+  margin-left: -7px;
+  border-radius: 50%;
+  background: var(--amber);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35);
+}
+
+.meters {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+}
+
+.phase-row, .net-row, .actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+.phase {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.speed {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 0.72rem;
+  color: var(--text);
+}
+
+.pbar {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 14px;
+  border-radius: 99px;
+  background: var(--surface-2);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.pbar-zero {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.pbar-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  background: var(--green);
+}
+
+.watts, .net {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.watts { font-size: 1.05rem; min-width: 6.2rem; text-align: right; }
+.net { font-size: 0.78rem; color: var(--text); }
+.substat { font-size: 0.68rem; color: var(--muted); }
+
+.actions { flex: 0 0 auto; }
+
+button, .btn {
+  appearance: none;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.38rem 0.75rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+button.primary { background: #1c3f68; border-color: rgba(61, 156, 245, 0.45); }
+button.go { background: #145c40; border-color: rgba(52, 211, 153, 0.4); }
+button.stop { background: #5c2430; border-color: rgba(248, 113, 113, 0.45); }
+
+.compare {
+  flex: 0 0 auto;
+  max-height: 6.4rem;
+  overflow: auto;
+  padding-bottom: max(0.35rem, var(--safe-b));
+}
+
+.compare h2 {
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 0.2rem;
+}
+
+.run {
+  width: 100%;
+  text-align: left;
+  border-radius: 10px;
+  padding: 0.32rem 0.5rem;
+  margin-bottom: 0.25rem;
+  background: var(--surface);
+}
+
+.run b { font-weight: 650; }
+.run .meta {
+  display: block;
+  color: var(--muted);
+  font-size: 0.65rem;
+  font-weight: 500;
+}
+
+.sheet {
+  position: absolute;
+  left: 0.45rem;
+  right: 0.45rem;
+  bottom: max(0.4rem, var(--safe-b));
+  max-height: 70%;
+  overflow: auto;
+  background: rgba(18, 26, 36, 0.96);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 0.7rem 0.75rem 0.85rem;
+  z-index: 5;
+}
+
+.sheet h2 {
+  font-family: "Michroma", system-ui, sans-serif;
+  font-size: 0.78rem;
+  font-weight: 400;
+  margin-bottom: 0.45rem;
+}
+
+.sheet[hidden] { display: none; }
+
+label.field {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.15rem 0.6rem;
+  align-items: center;
+  margin-bottom: 0.45rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+label.field input[type="range"] { grid-column: 1 / -1; width: 100%; }
+label.field output {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  color: var(--text);
+  font-size: 0.72rem;
+}
+
+.sheet-actions { display: flex; gap: 0.4rem; justify-content: flex-end; }
+
+.warn {
+  color: var(--amber);
+  font-size: 0.72rem;
+  min-height: 1em;
+}

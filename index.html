@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0a0e14" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="WindCart" />
+  <meta name="description" content="A plate on a rail. Face the wind on the way out, edge-on on the way back. Record the energy and compare runs." />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Mark Maga" />
+  <meta property="og:title" content="WindCart — a plate on a rail" />
+  <meta property="og:description" content="Face the wind on the way out, edge-on on the way back. Record the energy and compare runs." />
+  <meta property="og:url" content="https://windcart.markmaga.com/" />
+  <link rel="canonical" href="https://windcart.markmaga.com/" />
+  <meta property="og:image" content="https://windcart.markmaga.com/icon-512.png" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="WindCart — a plate on a rail" />
+  <meta name="twitter:description" content="Face the wind on the way out, edge-on on the way back. Record the energy and compare runs." />
+  <meta name="twitter:image" content="https://windcart.markmaga.com/icon-512.png" />
+  <title>WindCart — a plate on a rail | Mark Maga</title>
+  <!--
+    Desktop iOS-full-bleed.txt — Bug B (PWA short layout viewport).
+    PWA: fillH = max(innerHeight, screen long edge) BEFORE first paint.
+    Safari tab: visualViewport only. Do NOT use max-height:100dvh on PWA.
+  -->
+  <script>
+    (function () {
+      try {
+        var host = location.hostname || "";
+        var local = host === "localhost" || host === "127.0.0.1" || /^\d+\.\d+\.\d+\.\d+$/.test(host);
+        if (local && navigator.serviceWorker) {
+          navigator.serviceWorker.getRegistrations().then(function (regs) {
+            regs.forEach(function (reg) { reg.unregister(); });
+          });
+          if (window.caches && caches.keys) {
+            caches.keys().then(function (keys) { keys.forEach(function (k) { caches.delete(k); }); });
+          }
+        }
+        var r = document.documentElement;
+        var n = window.navigator;
+        var standalone =
+          n.standalone === true ||
+          (window.matchMedia &&
+            (window.matchMedia("(display-mode: standalone)").matches ||
+              window.matchMedia("(display-mode: fullscreen)").matches ||
+              window.matchMedia("(display-mode: minimal-ui)").matches));
+        var vv = window.visualViewport;
+        var iw = window.innerWidth || 0;
+        var ih = window.innerHeight || 0;
+        var sw = (window.screen && window.screen.width) || 0;
+        var sh = (window.screen && window.screen.height) || 0;
+        var screenMax = Math.max(sw, sh);
+        var screenMin = Math.min(sw, sh);
+        if (standalone) {
+          r.classList.add("pwa-standalone");
+          var fillH = ih >= iw ? Math.max(ih, screenMax) : Math.max(ih, screenMin);
+          var extra = 0;
+          if (Math.min(iw, ih) >= 600 && screenMax < ih - 10) extra = 20;
+          r.style.setProperty("--pwa-fill-h", fillH + "px");
+          r.style.setProperty("--pwa-extra-b", extra + "px");
+          r.style.setProperty("--vv-top", "0px");
+          r.style.setProperty("--vv-left", "0px");
+          r.style.setProperty("--vv-w", iw + "px");
+          r.style.setProperty("--vv-h", fillH + extra + "px");
+        } else if (vv && vv.height > 40 && vv.width > 40) {
+          r.style.setProperty("--vv-top", Math.max(0, Math.round(vv.offsetTop) || 0) + "px");
+          r.style.setProperty("--vv-left", Math.max(0, Math.round(vv.offsetLeft) || 0) + "px");
+          r.style.setProperty("--vv-w", Math.round(vv.width) + "px");
+          r.style.setProperty("--vv-h", Math.round(vv.height) + "px");
+        } else {
+          r.style.setProperty("--vv-top", "0px");
+          r.style.setProperty("--vv-left", "0px");
+          r.style.setProperty("--vv-w", iw + "px");
+          r.style.setProperty("--vv-h", ih + "px");
+        }
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="favicon.ico" sizes="32x32" />
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png" />
+  <link rel="icon" type="image/png" href="icon-192.png" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=IBM+Plex+Mono:wght@500;600&family=Michroma&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css?v=4" />
+</head>
+<body>
+  <div class="fit-stage" id="fit-stage">
+    <div class="app" id="app">
+      <header>
+        <h1>WindCart</h1>
+        <p class="build" id="build">js 4 · css 4</p>
+      </header>
+
+      <div class="stage-wrap">
+        <canvas id="view" aria-label="Wind cart on the rail"></canvas>
+        <div class="track-map" aria-hidden="true"><i id="map-dot"></i></div>
+      </div>
+
+      <section class="meters" aria-live="polite">
+        <div class="phase-row">
+          <span class="phase" id="phase">Ready</span>
+          <span class="speed" id="speed">0.0 m/s</span>
+        </div>
+        <div class="phase-row">
+          <div class="pbar" id="pbar" aria-hidden="true">
+            <div class="pbar-zero"></div>
+            <div class="pbar-fill" id="pfill"></div>
+          </div>
+          <span class="watts" id="watts">0 W</span>
+        </div>
+        <div class="net-row">
+          <span class="net" id="net">net 0.00 kJ</span>
+          <span class="substat" id="substat">0 cycles</span>
+        </div>
+        <p class="warn" id="warn"></p>
+      </section>
+
+      <div class="actions">
+        <button type="button" class="go" id="run">Run</button>
+        <button type="button" id="specs-btn">Specs</button>
+        <button type="button" id="rate">1×</button>
+      </div>
+
+      <section class="compare" aria-label="Saved runs">
+        <h2>Runs</h2>
+        <div id="runs"></div>
+      </section>
+
+      <form class="sheet" id="sheet" hidden>
+        <h2>Specs</h2>
+        <label class="field">Wind <output id="o-wind"></output>
+          <input id="wind" type="range" min="2" max="20" step="0.5" />
+        </label>
+        <label class="field">Plate width <output id="o-plateW"></output>
+          <input id="plateW" type="range" min="1" max="8" step="0.1" />
+        </label>
+        <label class="field">Plate height <output id="o-plateH"></output>
+          <input id="plateH" type="range" min="0.4" max="4" step="0.1" />
+        </label>
+        <label class="field">Track <output id="o-track"></output>
+          <input id="track" type="range" min="8" max="40" step="1" />
+        </label>
+        <label class="field">Cart mass <output id="o-mass"></output>
+          <input id="mass" type="range" min="10" max="200" step="1" />
+        </label>
+        <label class="field">Out speed <output id="o-outFrac"></output>
+          <input id="outFrac" type="range" min="0.15" max="0.6" step="0.01" />
+        </label>
+        <label class="field">Return speed <output id="o-vReturn"></output>
+          <input id="vReturn" type="range" min="1" max="16" step="0.5" />
+        </label>
+        <label class="field">Turn <output id="o-turn"></output>
+          <input id="turn" type="range" min="0.3" max="3" step="0.1" />
+        </label>
+        <label class="field">Rail force <output id="o-fMax"></output>
+          <input id="fMax" type="range" min="200" max="3000" step="50" />
+        </label>
+        <div class="sheet-actions">
+          <button type="button" id="defaults">Defaults</button>
+          <button type="button" class="primary" id="close-specs">Done</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  <script type="module" src="app.js?v=4"></script>
+</body>
+</html>
