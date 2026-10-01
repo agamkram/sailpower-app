@@ -86,14 +86,14 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=IBM+Plex+Mono:wght@500;600&family=Michroma&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=4" />
+  <link rel="stylesheet" href="styles.css?v=6" />
 </head>
 <body>
   <div class="fit-stage" id="fit-stage">
     <div class="app" id="app">
       <header>
         <h1>WindCart</h1>
-        <p class="build" id="build">js 4 · css 4</p>
+        <p class="build" id="build">js 6 · css 6</p>
       </header>
 
       <div class="stage-wrap">
@@ -160,6 +160,15 @@
         <label class="field">Rail force <output id="o-fMax"></output>
           <input id="fMax" type="range" min="200" max="3000" step="50" />
         </label>
+        <label class="field">Drag <output id="o-cd"></output>
+          <input id="cd" type="range" min="0.6" max="2" step="0.02" />
+        </label>
+        <label class="field">Efficiency <output id="o-eta"></output>
+          <input id="eta" type="range" min="0.5" max="0.98" step="0.01" />
+        </label>
+        <label class="field">Rolling <output id="o-crr"></output>
+          <input id="crr" type="range" min="0.001" max="0.04" step="0.001" />
+        </label>
         <div class="sheet-actions">
           <button type="button" id="defaults">Defaults</button>
           <button type="button" class="primary" id="close-specs">Done</button>
@@ -167,6 +176,6 @@
       </form>
     </div>
   </div>
-  <script type="module" src="app.js?v=4"></script>
+  <script type="module" src="app.js?v=6"></script>
 </body>
 </html>

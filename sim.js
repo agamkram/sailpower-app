@@ -19,6 +19,7 @@ export function defaultSpecs() {
     vReturn: 8,
     outFrac: 1 / 3,
     cuMax: 120,
+    eta: 0.85,
   };
 }
 
@@ -34,6 +35,10 @@ export function fitError(s) {
 
 export function createState(specs) {
   const s = { ...specs };
+  if (s.eta != null) {
+    s.etaG = s.eta;
+    s.etaM = s.eta;
+  }
   const pad = endPad(s);
   return {
     specs: s,
@@ -49,6 +54,7 @@ export function createState(specs) {
     inst: 0,
     force: 0,
     faero: 0,
+    slip: false,
     lastCycleNet: 0,
     cycleGen: 0,
     cycleMot: 0,
@@ -89,9 +95,16 @@ function rollForce(s, vx) {
   return -Math.sign(vx) * s.crr * s.mass * 9.81;
 }
 
-function brakeDist(s, speed) {
-  const a = (s.fMax / Math.max(5, s.mass)) * 0.8;
-  return (speed * speed) / (2 * Math.max(0.5, a)) + 0.3;
+function brakeDist(s, speed, fa) {
+  const push = speed >= 0 ? Math.max(0, fa) : Math.max(0, -fa);
+  const net = s.fMax - push;
+  if (net < 40) return Math.abs(speed) > 0.4 ? 1e6 : 0.15;
+  const a = (net / Math.max(5, s.mass)) * 0.85;
+  return (speed * speed) / (2 * a) + 0.3;
+}
+
+function canHold(s, fa, fr) {
+  return Math.abs(fa + fr) <= s.fMax;
 }
 
 function sub(st, dt) {
@@ -102,9 +115,9 @@ function sub(st, dt) {
   let phase = st.phase;
   const vOut = s.wind * s.outFrac;
 
-  if (phase === "out" && st.vx >= 0 && hi - st.x <= brakeDist(s, Math.max(st.vx, 0.4))) {
+  if (phase === "out" && st.vx >= 0 && hi - st.x <= brakeDist(s, st.vx, fa)) {
     phase = "brakeOut";
-  } else if (phase === "back" && st.vx <= 0 && st.x - lo <= brakeDist(s, Math.max(-st.vx, 0.4))) {
+  } else if (phase === "back" && st.vx <= 0 && st.x - lo <= brakeDist(s, st.vx, fa)) {
     phase = "brakeBack";
   }
 
@@ -121,17 +134,38 @@ function sub(st, dt) {
   } else {
     fCmd = s.mass * (22 * (xTarget - st.x) + 9 * (0 - st.vx)) - fa - fr;
   }
+  const fWant = fCmd;
   fCmd = clamp(fCmd, -s.fMax, s.fMax);
 
   const ax = (fa + fr + fCmd) / s.mass;
   st.vx += ax * dt;
   st.x += st.vx * dt;
+  st.slip = false;
+  if (Math.abs(fWant) > s.fMax + 5) {
+    if (phase === "turnEdge" || phase === "turnFace") st.slip = Math.abs(st.vx) > 0.25;
+    else if (phase === "brakeOut") st.slip = st.x > hi - 0.05 && st.vx > 0.4;
+    else if (phase === "brakeBack") st.slip = st.x < lo + 0.05 && st.vx < -0.4;
+    else if (phase === "out") st.slip = st.vx > vOut + 0.8;
+    else if (phase === "back") st.slip = st.vx > 0.5;
+  }
 
-  if (phase === "brakeOut" && Math.abs(st.vx) < 0.08 && Math.abs(st.x - hi) < 0.35) {
+  if (
+    phase === "brakeOut" &&
+    Math.abs(st.vx) < 0.15 &&
+    st.x > hi - 0.55 &&
+    st.x < hi + 0.8 &&
+    canHold(s, fa, fr)
+  ) {
     st.vx = 0;
     st.x = hi;
     phase = "turnEdge";
-  } else if (phase === "brakeBack" && Math.abs(st.vx) < 0.08 && Math.abs(st.x - lo) < 0.35) {
+  } else if (
+    phase === "brakeBack" &&
+    Math.abs(st.vx) < 0.15 &&
+    st.x < lo + 0.55 &&
+    st.x > lo - 0.8 &&
+    canHold(s, fa, fr)
+  ) {
     st.vx = 0;
     st.x = lo;
     phase = "turnFace";
@@ -140,16 +174,12 @@ function sub(st, dt) {
   const turnRate = (Math.PI / 2) / Math.max(0.15, s.turn);
   if (phase === "turnEdge") {
     st.alpha = Math.min(Math.PI / 2, st.alpha + turnRate * dt);
-    st.vx = 0;
-    st.x = hi;
     if (st.alpha >= Math.PI / 2 - 1e-4) {
       st.alpha = Math.PI / 2;
       phase = "back";
     }
   } else if (phase === "turnFace") {
     st.alpha = Math.max(0, st.alpha - turnRate * dt);
-    st.vx = 0;
-    st.x = lo;
     if (st.alpha <= 1e-4) {
       st.alpha = 0;
       phase = "out";

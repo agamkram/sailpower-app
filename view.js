@@ -1,4 +1,4 @@
-/** Side view. Face-on plate is the thin one. Edge-on plate faces the camera. */
+/** Side view of the machine. Face-on sail is the thin plate. Edge-on sail faces the camera. */
 
 function sub(a, b) {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -17,7 +17,7 @@ function hex(n) {
   const r = (n >> 16) & 255;
   const g = (n >> 8) & 255;
   const b = n & 255;
-  return `rgb(${r},${g},${b})`;
+  return `rgb(${r|0},${g|0},${b|0})`;
 }
 function shade(n, k) {
   const r = Math.max(0, Math.min(255, ((n >> 16) & 255) * k));
@@ -25,16 +25,34 @@ function shade(n, k) {
   const b = Math.max(0, Math.min(255, (n & 255) * k));
   return (r << 16) | (g << 8) | b;
 }
+function lerpP(a, b, t) {
+  return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+}
+function yawXZ(x, z, yaw) {
+  const c = Math.cos(yaw);
+  const s = Math.sin(yaw);
+  return [x * c - z * s, x * s + z * c];
+}
 
-const RAIL = 0xb4232a;
-const FRAME = 0x8e99a6;
-const WHEEL = 0xd5dbe3;
-const TIRE = 0x2a3140;
-const PLATE = 0x8b939c;
-const SKATE = 0xc5d0dc;
+const RAIL = 0xc43238;
+const RAIL_HI = 0xe15a52;
+const RUNG = 0x9a241c;
+const FRAME = 0x8b97a6;
+const FRAME_DK = 0x66717f;
+const WHEEL = 0xd7dee8;
+const HUB = 0x1b212b;
+const PLATE = 0x8d959e;
+const PLATE_EDGE = 0x5a636c;
+const MOTOR = 0x3e4a5c;
+const MOTOR_CAP = 0x1a212b;
+const RING = 0xb7c0ca;
+const STEEL = 0x3c4654;
+const TOOTH = 0x6a7686;
 const SKATE_ON = 0xe2b340;
 const SKATE_MOT = 0x6eb6e0;
-const RUNG = 0x8e1a22;
+const STOP = 0x6e1218;
+
+let followX = null;
 
 export function draw(canvas, st) {
   const ctx = canvas.getContext("2d");
@@ -47,65 +65,121 @@ export function draw(canvas, st) {
     canvas.height = Math.floor(h * dpr);
   }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const g = ctx.createLinearGradient(0, 0, 0, h);
-  g.addColorStop(0, "#141b26");
-  g.addColorStop(0.55, "#0c1118");
-  g.addColorStop(1, "#080b10");
-  ctx.fillStyle = g;
+  const sky = ctx.createLinearGradient(0, 0, 0, h);
+  sky.addColorStop(0, "#161d28");
+  sky.addColorStop(0.45, "#0d1219");
+  sky.addColorStop(1, "#070a0e");
+  ctx.fillStyle = sky;
   ctx.fillRect(0, 0, w, h);
 
   const s = st.specs;
-  // Square to the track: face-on reads as a thin plate, edge-on as the broad face.
-  const eye = [st.x, 1.05, 4.15];
-  const target = [st.x, 0.48, 0];
+  followX = st.x;
+
+  const zCam = Math.max(3.05, s.plateW * 0.5 + 0.95);
+  const eye = [followX, 0.62, zCam];
+  const target = [followX, 0.4, 0];
   const zaxis = norm(sub(eye, target));
   const xaxis = norm(cross([0, 1, 0], zaxis));
   const yaxis = cross(zaxis, xaxis);
-  const fov = 0.86;
-  const f = h / 2 / Math.tan(fov / 2);
-  const cam = { eye, xaxis, yaxis, zaxis, f, w, h };
+  const fov = 0.62;
+  const fLen = h / 2 / Math.tan(fov / 2);
+  const cam = { eye, xaxis, yaxis, zaxis, fLen, w, h };
+  const NEAR = 0.16;
 
   const polys = [];
+  function depthOf(p) {
+    return -dot(sub(p, cam.eye), cam.zaxis);
+  }
   function project(p) {
     const d = sub(p, cam.eye);
     const depth = -dot(d, cam.zaxis);
-    if (depth < 0.08) return null;
+    if (depth < 0.05) return null;
     return {
-      x: w / 2 + (dot(d, cam.xaxis) / depth) * cam.f,
-      y: h / 2 - (dot(d, cam.yaxis) / depth) * cam.f,
+      x: w / 2 + (dot(d, cam.xaxis) / depth) * cam.fLen,
+      y: h / 2 - (dot(d, cam.yaxis) / depth) * cam.fLen,
       z: depth,
     };
   }
+  function clipNear(pts) {
+    const pack = pts.map((p) => ({ p, depth: depthOf(p) }));
+    const out = [];
+    for (let i = 0; i < pack.length; i++) {
+      const a = pack[i];
+      const b = pack[(i + 1) % pack.length];
+      const aIn = a.depth >= NEAR;
+      const bIn = b.depth >= NEAR;
+      if (aIn && bIn) out.push(b.p);
+      else if (aIn && !bIn) {
+        const t = (a.depth - NEAR) / (a.depth - b.depth);
+        out.push(lerpP(a.p, b.p, t));
+      } else if (!aIn && bIn) {
+        const t = (a.depth - NEAR) / (a.depth - b.depth);
+        out.push(lerpP(a.p, b.p, t));
+        out.push(b.p);
+      }
+    }
+    return out;
+  }
   function add(pts, color) {
+    const clipped = clipNear(pts);
+    if (clipped.length < 3) return;
     const proj = [];
     let z = 0;
-    for (const p of pts) {
+    for (const p of clipped) {
       const q = project(p);
       if (!q) return;
       proj.push(q);
       z += q.z;
     }
-    polys.push({ proj, color, z: z / pts.length });
+    if (proj.some((q) => Math.abs(q.x) > w * 4 || Math.abs(q.y) > h * 4)) return;
+    polys.push({ proj, color, z: z / proj.length });
   }
-  function wheel(c, axis, r, width, color) {
-    const N = 12;
-    const rings = [-width / 2, width / 2].map((off) => {
-      const pts = [];
-      for (let i = 0; i < N; i++) {
-        const a = (i / N) * Math.PI * 2;
-        const cs = Math.cos(a) * r;
-        const sn = Math.sin(a) * r;
-        if (axis === "z") pts.push([c[0] + cs, c[1] + sn, c[2] + off]);
-        else if (axis === "y") pts.push([c[0] + cs, c[1] + off, c[2] + sn]);
-        else pts.push([c[0] + off, c[1] + cs, c[2] + sn]);
-      }
-      return pts;
-    });
-    add(rings[0], shade(color, 1.05));
-    add(rings[1], shade(color, 0.78));
+  function ring(c, axis, r, off, spin) {
+    const N = 10;
+    const pts = [];
+    for (let i = 0; i < N; i++) {
+      const a = (i / N) * Math.PI * 2 + spin;
+      const cs = Math.cos(a) * r;
+      const sn = Math.sin(a) * r;
+      if (axis === "z") pts.push([c[0] + cs, c[1] + sn, c[2] + off]);
+      else if (axis === "y") pts.push([c[0] + cs, c[1] + off, c[2] + sn]);
+      else pts.push([c[0] + off, c[1] + cs, c[2] + sn]);
+    }
+    return pts;
+  }
+  function wheel(c, axis, r, width, color, spin = 0, spokes = false) {
+    const N = 10;
+    const rings = [-width / 2, width / 2].map((off) => ring(c, axis, r, off, spin));
+    add(rings[0], shade(color, 1.08));
+    add(rings[1], shade(color, 0.72));
     for (let i = 0; i < N; i++) {
       const j = (i + 1) % N;
       add([rings[0][i], rings[0][j], rings[1][j], rings[1][i]], shade(color, 0.9));
+    }
+    if (!spokes) return;
+    for (let k = 0; k < 3; k++) {
+      const a = spin + (k * Math.PI) / 3;
+      const cs = Math.cos(a);
+      const sn = Math.sin(a);
+      const u = 0.012;
+      let p0;
+      let p1;
+      let q0;
+      let q1;
+      if (axis === "z") {
+        p0 = [c[0] + cs * 0.012, c[1] + sn * 0.012, c[2]];
+        p1 = [c[0] + cs * r * 0.78, c[1] + sn * r * 0.78, c[2]];
+        q0 = [p0[0] - sn * u, p0[1] + cs * u, c[2]];
+        q1 = [p1[0] - sn * u, p1[1] + cs * u, c[2]];
+      } else if (axis === "y") {
+        p0 = [c[0] + cs * 0.012, c[1], c[2] + sn * 0.012];
+        p1 = [c[0] + cs * r * 0.78, c[1], c[2] + sn * r * 0.78];
+        q0 = [p0[0] - sn * u, c[1], p0[2] + cs * u];
+        q1 = [p1[0] - sn * u, c[1], p1[2] + cs * u];
+      } else {
+        continue;
+      }
+      add([p0, q0, q1, p1], HUB);
     }
   }
   function box(cx, cy, cz, sx, sy, sz, yaw, color) {
@@ -122,7 +196,6 @@ export function draw(canvas, st) {
         }
       }
     }
-    // corners: x0y0z0, x0y0z1, x0y1z0, x0y1z1, x1y0z0, x1y0z1, x1y1z0, x1y1z1
     const faces = [
       [0, 1, 5, 4],
       [2, 6, 7, 3],
@@ -131,85 +204,129 @@ export function draw(canvas, st) {
       [0, 2, 3, 1],
       [4, 5, 7, 6],
     ];
-    const ks = [0.7, 1.05, 0.85, 0.95, 0.6, 0.9];
-    faces.forEach((f, i) => add(f.map((k) => P[k]), shade(color, ks[i])));
+    const ks = [0.62, 1.08, 0.78, 0.92, 0.7, 0.98];
+    faces.forEach((face, i) => add(face.map((k) => P[k]), shade(color, ks[i])));
   }
 
-  const railR = 0.06;
+  const railR = 0.05;
   const railY = 0.2;
   const gauge = s.gauge;
-  const x0 = st.x - 9;
-  const x1 = st.x + 7;
+  const x0 = followX - 2.6;
+  const x1 = followX + 2.6;
+  const bx = st.x;
+  const spin = -st.x / 0.062;
 
   add(
     [
-      [x0, 0, -2.2],
-      [x1, 0, -2.2],
-      [x1, 0, 2.2],
-      [x0, 0, 2.2],
+      [x0, 0, -1.6],
+      [x1, 0, -1.6],
+      [x1, 0, 1.6],
+      [x0, 0, 1.6],
     ],
     0x10151c
   );
 
-  for (let x = Math.floor(x0); x < x1; x += 0.55) {
-    if (x < -0.2 || x > s.track + 0.2) continue;
-    box(x, railY, 0, 0.06, 0.045, gauge - 0.12, 0, RUNG);
-  }
-
   for (const z of [-gauge / 2, gauge / 2]) {
-    const seg = 0.7;
+    const seg = 0.42;
     for (let x = x0; x < x1; x += seg) {
-      if (x + seg < -0.3 || x > s.track + 0.3) continue;
-      const a0 = Math.max(-0.15, x);
-      const a1 = Math.min(s.track + 0.15, x + seg);
-      if (a1 <= a0) continue;
-      wheel([(a0 + a1) / 2, railY, z], "x", railR, a1 - a0, RAIL);
+      const a0 = Math.max(0, x);
+      const a1 = Math.min(s.track, x + seg);
+      if (a1 - a0 < 0.05) continue;
+      const mid = (a0 + a1) / 2;
+      wheel([mid, railY, z], "x", railR, a1 - a0, RAIL, 0, false);
+      wheel([mid, railY + railR * 0.45, z], "x", railR * 0.28, (a1 - a0) * 0.92, RAIL_HI, 0, false);
     }
   }
 
-  const span0 = Math.max(0, st.x - 5);
-  const span1 = Math.min(s.track, st.x + 5);
-  if (span1 > span0) {
-    box((span0 + span1) / 2, railY - 0.02, 0, span1 - span0, 0.035, 0.08, 0, 0x3a4454);
+  for (let x = Math.floor(x0 * 2) / 2; x < x1; x += 0.34) {
+    if (x < 0.05 || x > s.track - 0.05) continue;
+    if (Math.abs(x - bx) < 0.46) continue;
+    wheel([x, railY, 0], "z", 0.028, gauge - 0.02, RUNG, 0, false);
   }
 
-  const bx = st.x;
-  const topR = 0.07;
+  if (x0 < 0.08 && x1 > 0) box(0.04, railY + 0.08, 0, 0.04, 0.22, gauge + 0.08, 0, STOP);
+  if (x0 < s.track && x1 > s.track - 0.08) {
+    box(s.track - 0.04, railY + 0.08, 0, 0.04, 0.22, gauge + 0.08, 0, STOP);
+  }
+
+  const span0 = Math.max(0, x0);
+  const span1 = Math.min(s.track, x1);
+  if (span1 > span0) {
+    box((span0 + span1) / 2, railY - 0.045, 0, span1 - span0, 0.028, 0.09, 0, STEEL);
+    for (let x = Math.ceil(span0 / 0.14) * 0.14; x < span1; x += 0.14) {
+      if (Math.abs(x - bx) < 0.22) continue;
+      box(x, railY - 0.02, 0, 0.045, 0.03, 0.07, 0, TOOTH);
+    }
+  }
+
+  const topR = 0.064;
   const sideR = 0.04;
   const botR = 0.05;
+  const topY = railY + railR + topR * 0.92;
+  const botY = railY - railR - botR * 0.92;
+
   for (const z of [-gauge / 2, gauge / 2]) {
-    const side = Math.sign(z) || 1;
-    for (const dx of [-0.26, 0.26]) {
-      wheel([bx + dx, railY + railR + topR * 0.92, z], "z", topR, 0.038, WHEEL);
-      wheel([bx + dx, railY + railR + topR * 0.92, z], "z", 0.018, 0.04, TIRE);
+    const side = z > 0 ? 1 : -1;
+    const inboard = z - side * 0.045;
+    box(bx, topY + 0.02, z, 0.62, 0.02, 0.04, 0, FRAME);
+    box(bx, railY - 0.01, inboard, 0.62, 0.018, 0.02, 0, FRAME_DK);
+    for (const dx of [-0.22, 0.22]) {
+      wheel([bx + dx, topY, z], "z", topR, 0.03, WHEEL, spin, true);
+      wheel([bx + dx, topY, z], "z", topR * 1.08, 0.01, FRAME_DK, spin, false);
+      wheel([bx + dx, topY, z], "z", 0.02, 0.034, HUB, spin, false);
+      wheel([bx + dx, botY, z + side * 0.01], "z", botR, 0.026, WHEEL, spin, true);
+      wheel([bx + dx, botY, z + side * 0.01], "z", 0.016, 0.03, HUB, spin, false);
+      box(bx + dx, (topY + botY) / 2, inboard, 0.028, topY - botY, 0.02, 0, FRAME);
     }
-    for (const dx of [-0.08, 0.08]) {
-      wheel(
-        [bx + dx, railY, z + side * (railR + sideR * 0.85)],
-        "y",
-        sideR,
-        0.028,
-        WHEEL
-      );
+    for (const dx of [-0.06, 0.06]) {
+      const sz = z + side * (railR + sideR * 0.2);
+      wheel([bx + dx, railY, sz], "y", sideR, 0.03, WHEEL, spin * 0.5, false);
+      wheel([bx + dx, railY, sz], "y", sideR * 0.45, 0.034, HUB, 0, false);
     }
-    for (const dx of [-0.16, 0.16]) {
-      wheel([bx + dx, railY - railR - botR * 0.85, z], "z", botR, 0.032, FRAME);
-    }
-    box(bx, railY + railR + topR * 1.55, z, 0.72, 0.05, 0.07, 0, FRAME);
   }
-  box(bx, railY + railR + topR * 1.7, 0, 0.16, 0.06, gauge - 0.05, 0, FRAME);
-  box(bx, railY + 0.02, 0, 0.22, 0.08, 0.16, 0, 0x6d7886);
+
+  const deckY = topY + 0.07;
+  box(bx, deckY, 0, 0.22, 0.04, gauge - 0.12, 0, FRAME);
+  box(bx, deckY - 0.02, 0, 0.5, 0.028, 0.08, 0, FRAME_DK);
 
   const generating = st.inst > 30;
   const motoring = st.inst < -30;
-  const skateColor = generating ? SKATE_ON : motoring ? SKATE_MOT : SKATE;
-  box(bx, railY + 0.01, 0, 0.36, 0.05, 0.1, 0, skateColor);
+  const mag = generating ? SKATE_ON : motoring ? SKATE_MOT : 0x9aa6b4;
+  for (let i = -2; i <= 2; i++) {
+    box(bx + i * 0.07, railY - 0.012, 0, 0.05, 0.022, 0.06, 0, i % 2 ? mag : shade(mag, 0.55));
+  }
 
-  const py0 = railY + 0.42;
-  const py1 = py0 + s.plateH;
   const yaw = st.alpha;
-  box(bx, (py0 + py1) / 2, 0, 0.02, s.plateH, s.plateW, yaw, PLATE);
-  box(bx, py0 - 0.08, 0, 0.06, 0.16, 0.06, 0, FRAME);
+  wheel([bx, deckY + 0.045, 0], "y", 0.105, 0.04, RING, yaw, true);
+  wheel([bx, deckY + 0.045, 0], "y", 0.045, 0.05, HUB, yaw, false);
+  for (let k = 0; k < 4; k++) {
+    const a = yaw + (k * Math.PI) / 2;
+    const [lx, lz] = yawXZ(0, 0.078, a);
+    box(bx + lx, deckY + 0.07, lz, 0.028, 0.02, 0.05, a, RING);
+  }
+
+  const mz = 0.24;
+  box(bx - 0.02, deckY + 0.06, mz, 0.1, 0.09, 0.1, 0, MOTOR);
+  wheel([bx + 0.1, deckY + 0.06, mz], "x", 0.042, 0.2, MOTOR, 0, false);
+  wheel([bx + 0.21, deckY + 0.06, mz], "x", 0.046, 0.03, MOTOR_CAP, 0, false);
+  for (let i = 0; i < 4; i++) {
+    wheel([bx + 0.02 + i * 0.045, deckY + 0.06, mz], "x", 0.05, 0.01, shade(MOTOR, 1.25), 0, false);
+  }
+  wheel([bx - 0.02, deckY + 0.05, 0.14], "y", 0.032, 0.04, HUB, yaw * 3, true);
+
+  const py0 = deckY + 0.2;
+  const py1 = py0 + s.plateH;
+  const midY = (py0 + py1) / 2;
+  box(bx, (deckY + py0) / 2, 0, 0.045, py0 - deckY, 0.045, yaw, FRAME);
+  box(bx, midY, 0, 0.018, s.plateH, s.plateW, yaw, PLATE);
+  box(bx, py1 - 0.015, 0, 0.028, 0.03, s.plateW, yaw, PLATE_EDGE);
+  box(bx, py0 + 0.015, 0, 0.028, 0.03, s.plateW, yaw, PLATE_EDGE);
+  for (const end of [-1, 1]) {
+    const [ox, oz] = yawXZ(0, end * (s.plateW / 2 - 0.015), yaw);
+    box(bx + ox, midY, oz, 0.028, s.plateH, 0.03, yaw, PLATE_EDGE);
+  }
+  const [rx, rz] = yawXZ(0, 0.22, yaw);
+  box(bx + rx, py0 + s.plateH * 0.28, rz, 0.02, s.plateH * 0.5, 0.025, yaw, PLATE_EDGE);
 
   polys.sort((a, b) => b.z - a.z);
   for (const poly of polys) {
@@ -221,7 +338,7 @@ export function draw(canvas, st) {
     ctx.fill();
   }
 
-  ctx.fillStyle = "rgba(232,237,244,0.72)";
+  ctx.fillStyle = "rgba(232,237,244,0.78)";
   ctx.font = "600 12px 'DM Sans', system-ui, sans-serif";
   ctx.fillText("wind", 14, 22);
   ctx.beginPath();
@@ -230,7 +347,7 @@ export function draw(canvas, st) {
   ctx.lineTo(90, 13);
   ctx.moveTo(96, 18);
   ctx.lineTo(90, 23);
-  ctx.strokeStyle = "rgba(232,237,244,0.72)";
+  ctx.strokeStyle = "rgba(232,237,244,0.78)";
   ctx.lineWidth = 1.5;
   ctx.stroke();
 }

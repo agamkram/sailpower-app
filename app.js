@@ -10,7 +10,7 @@ import { draw } from "./view.js";
 
 const KEY = "windcart-runs-v1";
 const RATES = [1, 4, 8];
-const FIELDS = ["wind", "plateW", "plateH", "track", "mass", "outFrac", "vReturn", "turn", "fMax"];
+const FIELDS = ["wind", "plateW", "plateH", "track", "mass", "outFrac", "vReturn", "turn", "fMax", "cd", "eta", "crr"];
 
 let specs = loadSpecs();
 let state = createState(specs);
@@ -18,6 +18,7 @@ let running = false;
 let rate = 1;
 let last = 0;
 let runs = loadRuns();
+let powerScale = 1500;
 
 const $ = (id) => document.getElementById(id);
 
@@ -104,6 +105,9 @@ function paintForm() {
   $("o-vReturn").textContent = s.vReturn.toFixed(1) + " m/s";
   $("o-turn").textContent = s.turn.toFixed(1) + " s";
   $("o-fMax").textContent = s.fMax.toFixed(0) + " N";
+  $("o-cd").textContent = s.cd.toFixed(2);
+  $("o-eta").textContent = Math.round(s.eta * 100) + "%";
+  $("o-crr").textContent = s.crr.toFixed(3);
   $("warn").textContent = fitError(s);
 }
 
@@ -120,7 +124,9 @@ function fmtKJ(j) {
 
 function paint() {
   const err = fitError(state.specs);
-  $("phase").textContent = running ? phaseLabel(state.phase) : err || "Ready";
+  let label = running ? phaseLabel(state.phase) : err || "Ready";
+  if (running && state.slip) label += " · slipping";
+  $("phase").textContent = label;
   $("speed").textContent = state.vx.toFixed(1) + " m/s";
   $("watts").textContent = fmtW(state.inst);
   $("watts").style.color = state.inst >= 0 ? "var(--green)" : "var(--amber)";
@@ -130,7 +136,8 @@ function paint() {
   $("substat").textContent =
     state.cycles + (state.cycles === 1 ? " cycle" : " cycles") +
     (state.time > 0.5 ? " · " + Math.round(avg) + " W avg" : "");
-  const span = 2000;
+  powerScale = Math.max(800, powerScale * 0.998, Math.abs(state.inst) * 1.25);
+  const span = powerScale;
   const pct = Math.max(-50, Math.min(50, (state.inst / span) * 50));
   const fill = $("pfill");
   if (pct >= 0) {
@@ -145,6 +152,26 @@ function paint() {
   const along = state.specs.track > 0 ? (state.x / state.specs.track) * 100 : 0;
   $("map-dot").style.left = Math.max(0, Math.min(100, along)) + "%";
   draw($("view"), state);
+}
+
+function changedBits(specs) {
+  const d = defaultSpecs();
+  const bits = [];
+  const far = (k, eps = 1e-4) => Math.abs(Number(specs[k]) - Number(d[k])) > eps;
+  if (far("wind")) bits.push(Number(specs.wind).toFixed(1) + " m/s");
+  if (far("plateW") || far("plateH")) {
+    bits.push(Number(specs.plateW).toFixed(1) + "×" + Number(specs.plateH).toFixed(1) + " m");
+  }
+  if (far("track")) bits.push(Number(specs.track).toFixed(0) + " m track");
+  if (far("mass")) bits.push(Number(specs.mass).toFixed(0) + " kg");
+  if (far("outFrac", 0.008)) bits.push("out " + Number(specs.outFrac).toFixed(2));
+  if (far("vReturn")) bits.push("ret " + Number(specs.vReturn).toFixed(1));
+  if (far("turn")) bits.push("turn " + Number(specs.turn).toFixed(1) + " s");
+  if (far("fMax")) bits.push(Number(specs.fMax).toFixed(0) + " N");
+  if (far("cd", 0.01)) bits.push("Cd " + Number(specs.cd).toFixed(2));
+  if (far("eta", 0.005)) bits.push(Math.round(Number(specs.eta) * 100) + "%");
+  if (far("crr", 0.0005)) bits.push("roll " + Number(specs.crr).toFixed(3));
+  return bits.length ? bits.join(" · ") : "defaults";
 }
 
 function paintRuns() {
@@ -162,11 +189,17 @@ function paintRuns() {
     btn.type = "button";
     btn.className = "run";
     const area = row.plateW * row.plateH;
+    const gen = row.gen || 0;
+    const mot = row.mot || 0;
+    const hold = row.hold || 0;
     btn.innerHTML =
       "<b>" + fmtKJ(row.net) + "</b> · " + Math.round(row.avg) + " W avg" +
       '<span class="meta">' +
-      row.cycles + " cyc · " + row.seconds.toFixed(0) + " s · " +
-      row.wind + " m/s · " + area.toFixed(1) + " m² · " + row.mass + " kg · ret " + row.vReturn +
+      fmtKJ(gen) + " made · " + fmtKJ(-mot) + " home · " + fmtKJ(-hold) + " hold" +
+      "</span>" +
+      '<span class="meta">' +
+      row.cycles + " cyc · " + row.seconds.toFixed(0) + " s · " + area.toFixed(1) + " m² · " +
+      changedBits(row.specs || row) +
       "</span>";
     btn.addEventListener("click", () => {
       if (running) return;
@@ -228,6 +261,7 @@ function setRunning(on) {
     state = createState(specs);
     running = true;
     last = 0;
+    powerScale = 1500;
     $("run").textContent = "Stop";
     $("run").className = "stop";
   } else {
@@ -262,13 +296,6 @@ for (const id of FIELDS) {
     paintForm();
     if (!running) {
       specs = readForm();
-      const x = state.x;
-      const kept = createState(specs);
-      if (!fitError(specs)) {
-        kept.x = Math.min(Math.max(x, 0), specs.track);
-      }
-      state = kept;
-      // Park face-on at the upwind end so the picture matches the spec.
       state = createState(specs);
       paint();
     }

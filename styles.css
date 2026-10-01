@@ -224,7 +224,7 @@ button.stop { background: #5c2430; border-color: rgba(248, 113, 113, 0.45); }
 
 .compare {
   flex: 0 0 auto;
-  max-height: 6.4rem;
+  max-height: 8.6rem;
   overflow: auto;
   padding-bottom: max(0.35rem, var(--safe-b));
 }

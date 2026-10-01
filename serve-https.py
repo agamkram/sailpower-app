@@ -329,7 +329,7 @@ def main():
     ctx.load_cert_chain(certfile=str(CERT), keyfile=str(KEY))
     httpsd.socket = ctx.wrap_socket(httpsd.socket, server_side=True)
 
-    print("GridBoard", flush=True)
+    print("WindCart", flush=True)
     print("  Mac:    https://127.0.0.1:%s/" % port, flush=True)
     if lan_hint:
         print("  LAN:    https://%s:%s/" % (lan_hint, port), flush=True)
