@@ -11,7 +11,7 @@ export function defaultSpecs() {
     cd: 1.28,
     rho: 1.225,
     thickness: 0.006,
-    turn: 1,
+    turn: 0.5,
     fMax: 1000,
     etaG: 0.85,
     etaM: 0.85,
@@ -23,12 +23,28 @@ export function defaultSpecs() {
   };
 }
 
+export function stroke(s) {
+  const reach = 0.34;
+  const cap = 0.08;
+  const capHalf = 0.035;
+  const gap = 0.45;
+  const inset = cap + capHalf + reach + gap;
+  return {
+    lo: inset,
+    hi: s.track - inset,
+    cap0: cap,
+    cap1: s.track - cap,
+    half: reach,
+  };
+}
+
 export function endPad(s) {
-  return 0.5 * s.plateW + 0.5;
+  return stroke(s).lo;
 }
 
 export function fitError(s) {
-  if (endPad(s) * 2 + 2 > s.track) return "Sail is too wide for this track.";
+  const { lo, hi } = stroke(s);
+  if (hi - lo < 2) return "Track is too short.";
   if (s.plateW < 0.2 || s.plateH < 0.2) return "Sail is too small.";
   return "";
 }
@@ -39,10 +55,10 @@ export function createState(specs) {
     s.etaG = s.eta;
     s.etaM = s.eta;
   }
-  const pad = endPad(s);
+  const { lo } = stroke(s);
   return {
     specs: s,
-    x: pad,
+    x: lo,
     vx: 0,
     alpha: 0,
     phase: "out",
@@ -71,8 +87,8 @@ function clamp(v, a, b) {
 }
 
 function limits(s) {
-  const pad = endPad(s);
-  return { lo: pad, hi: s.track - pad };
+  const { lo, hi } = stroke(s);
+  return { lo, hi };
 }
 
 /** Axial force on the cart, newtons, +x downwind. */
@@ -113,35 +129,105 @@ function sub(st, dt) {
   const fa = aeroForce(s, st.vx, st.alpha);
   const fr = rollForce(s, st.vx);
   let phase = st.phase;
-  const vOut = s.wind * s.outFrac;
+  const recipe = s.recipe || "wayin";
+  const turnSec = recipe === "wayin" ? s.turn : 1;
+  const vOut = s.wind * (recipe === "slowout" ? 0.28 : s.outFrac);
+  const turnRate = (Math.PI / 2) / Math.max(0.15, turnSec);
+  const stiff = recipe === "park" || recipe === "early";
+  const brake = brakeDist(s, st.vx, fa);
+  let needOut = brake;
+  let needBack = brake;
+  if (recipe === "early" || recipe === "earlyCoil") {
+    needOut = Math.max(brake, Math.abs(st.vx) * turnSec + 0.35);
+    needBack = brake + Math.max(1.1, turnSec * 1.8);
+  } else if (recipe === "wayin") {
+    const slewDist = Math.max(brake, Math.abs(st.vx) * turnSec * 0.5);
+    needOut = slewDist;
+    needBack = slewDist;
+  }
 
-  if (phase === "out" && st.vx >= 0 && hi - st.x <= brakeDist(s, st.vx, fa)) {
+  if (phase === "out" && st.vx >= 0 && hi - st.x <= needOut) {
     phase = "brakeOut";
-  } else if (phase === "back" && st.vx <= 0 && st.x - lo <= brakeDist(s, st.vx, fa)) {
+    st.feather0 = Math.max(0.3, hi - st.x);
+  } else if (phase === "back" && st.vx <= 0 && st.x - lo <= needBack) {
     phase = "brakeBack";
+    st.openAt = Math.max(0.3, st.x - lo);
   }
 
-  let vTarget = 0;
-  let xTarget = st.x;
-  if (phase === "out") vTarget = vOut;
-  else if (phase === "back") vTarget = -Math.abs(s.vReturn);
-  else if (phase === "brakeOut" || phase === "turnEdge") xTarget = hi;
-  else xTarget = lo;
+  if (recipe !== "park" && phase === "brakeOut") {
+    const span = Math.max(0.3, st.feather0 || hi - st.x);
+    const remain = Math.max(0, hi - st.x);
+    const want = (1 - remain / span) * (Math.PI / 2);
+    if (st.alpha < want) st.alpha = Math.min(want, st.alpha + turnRate * dt);
+  } else if (recipe !== "park" && phase === "brakeBack") {
+    const span = Math.max(0.3, st.openAt || st.x - lo);
+    const remain = Math.max(0, st.x - lo);
+    const openStart =
+      recipe === "early" || recipe === "earlyCoil"
+        ? Math.min(span, Math.max(0.8, turnSec * 1.4))
+        : span;
+    if (remain < openStart) {
+      const want = (remain / openStart) * (Math.PI / 2);
+      if (st.alpha > want) st.alpha = Math.max(want, st.alpha - turnRate * dt);
+    }
+  } else if (phase === "turnEdge") {
+    st.alpha = Math.min(Math.PI / 2, st.alpha + turnRate * dt);
+  } else if (phase === "turnFace") {
+    st.alpha = Math.max(0, st.alpha - turnRate * dt);
+  }
 
+  const faNow = aeroForce(s, st.vx, st.alpha);
   let fCmd;
-  if (phase === "out" || phase === "back") {
-    fCmd = s.mass * 4 * (vTarget - st.vx) - fa - fr;
+  let coilLimited = false;
+  if (stiff) {
+    let raw;
+    if (phase === "out") raw = s.mass * 4 * (vOut - st.vx) - faNow - fr;
+    else if (phase === "back") raw = s.mass * 4 * (-Math.abs(s.vReturn) - st.vx) - faNow - fr;
+    else if (phase === "brakeOut" || phase === "turnEdge") {
+      raw = s.mass * (22 * (hi - st.x) + 9 * (0 - st.vx)) - faNow - fr;
+    } else {
+      raw = s.mass * (22 * (lo - st.x) + 9 * (0 - st.vx)) - faNow - fr;
+    }
+    coilLimited = Math.abs(raw) > s.fMax + 5;
+    fCmd = clamp(raw, -s.fMax, s.fMax);
   } else {
-    fCmd = s.mass * (22 * (xTarget - st.x) + 9 * (0 - st.vx)) - fa - fr;
+    let aDes = 0;
+    if (phase === "out") aDes = 4 * (vOut - st.vx);
+    else if (phase === "back") aDes = 4 * (-Math.abs(s.vReturn) - st.vx);
+    else if (phase === "brakeOut" || phase === "turnEdge") {
+      const dist = Math.max(0.12, hi - st.x);
+      aDes = st.vx > 0.05 ? -(st.vx * st.vx) / (2 * dist) : 4 * (0 - st.vx);
+    } else {
+      const dist = Math.max(0.12, st.x - lo);
+      aDes = st.vx < -0.05 ? (st.vx * st.vx) / (2 * dist) : 4 * (0 - st.vx);
+    }
+    const aMin = (faNow + fr - s.fMax) / s.mass;
+    const aMax = (faNow + fr + s.fMax) / s.mass;
+    const aUse = clamp(aDes, aMin, aMax);
+    coilLimited = Math.abs(aUse - aDes) > 0.2;
+    fCmd = s.mass * aUse - faNow - fr;
   }
-  const fWant = fCmd;
-  fCmd = clamp(fCmd, -s.fMax, s.fMax);
 
-  const ax = (fa + fr + fCmd) / s.mass;
+  const ax = (faNow + fr + fCmd) / s.mass;
   st.vx += ax * dt;
   st.x += st.vx * dt;
+  if (st.x >= hi) {
+    st.x = hi;
+    if (st.vx > 0) st.vx = 0;
+    if (phase === "out") {
+      phase = "brakeOut";
+      st.feather0 = 0.3;
+    }
+  } else if (st.x <= lo) {
+    st.x = lo;
+    if (st.vx < 0) st.vx = 0;
+    if (phase === "back") {
+      phase = "brakeBack";
+      st.openAt = 0.3;
+    }
+  }
   st.slip = false;
-  if (Math.abs(fWant) > s.fMax + 5) {
+  if (coilLimited) {
     if (phase === "turnEdge" || phase === "turnFace") st.slip = Math.abs(st.vx) > 0.25;
     else if (phase === "brakeOut") st.slip = st.x > hi - 0.05 && st.vx > 0.4;
     else if (phase === "brakeBack") st.slip = st.x < lo + 0.05 && st.vx < -0.4;
@@ -149,38 +235,18 @@ function sub(st, dt) {
     else if (phase === "back") st.slip = st.vx > 0.5;
   }
 
-  if (
-    phase === "brakeOut" &&
-    Math.abs(st.vx) < 0.15 &&
-    st.x > hi - 0.55 &&
-    st.x < hi + 0.8 &&
-    canHold(s, fa, fr)
-  ) {
+  const parked = Math.abs(st.vx) < 0.15;
+  if ((phase === "brakeOut" || phase === "turnEdge") && parked && st.x > hi - 0.08) {
     st.vx = 0;
     st.x = hi;
-    phase = "turnEdge";
-  } else if (
-    phase === "brakeBack" &&
-    Math.abs(st.vx) < 0.15 &&
-    st.x < lo + 0.55 &&
-    st.x > lo - 0.8 &&
-    canHold(s, fa, fr)
-  ) {
-    st.vx = 0;
-    st.x = lo;
-    phase = "turnFace";
-  }
-
-  const turnRate = (Math.PI / 2) / Math.max(0.15, s.turn);
-  if (phase === "turnEdge") {
-    st.alpha = Math.min(Math.PI / 2, st.alpha + turnRate * dt);
-    if (st.alpha >= Math.PI / 2 - 1e-4) {
+    if (st.alpha >= Math.PI / 2 - 0.05) {
       st.alpha = Math.PI / 2;
       phase = "back";
-    }
-  } else if (phase === "turnFace") {
-    st.alpha = Math.max(0, st.alpha - turnRate * dt);
-    if (st.alpha <= 1e-4) {
+    } else phase = "turnEdge";
+  } else if ((phase === "brakeBack" || phase === "turnFace") && parked && st.x < lo + 0.08) {
+    st.vx = 0;
+    st.x = lo;
+    if (st.alpha <= 0.05) {
       st.alpha = 0;
       phase = "out";
       st.cycles += 1;
@@ -188,7 +254,7 @@ function sub(st, dt) {
       st.cycleGen = 0;
       st.cycleMot = 0;
       st.cycleHold = 0;
-    }
+    } else phase = "turnFace";
   }
 
   const mech = -fCmd * st.vx;
@@ -214,7 +280,7 @@ function sub(st, dt) {
 
   st.phase = phase;
   st.force = fCmd;
-  st.faero = fa;
+  st.faero = faNow;
   st.inst = inst;
   st.time += dt;
 }
@@ -234,15 +300,15 @@ export function phaseLabel(phase) {
     case "out":
       return "Out, face-on";
     case "brakeOut":
-      return "Brake";
+      return "Feather";
     case "turnEdge":
-      return "Turn edge-on";
+      return "Edge-on";
     case "back":
       return "Return, edge-on";
     case "brakeBack":
-      return "Brake";
+      return "Opening";
     case "turnFace":
-      return "Turn face-on";
+      return "Face-on";
     default:
       return phase;
   }

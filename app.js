@@ -6,7 +6,7 @@ import {
   phaseLabel,
   step,
 } from "./sim.js";
-import { draw } from "./view.js";
+import { draw, bindCam } from "./view.js";
 
 const KEY = "windcart-runs-v1";
 const RATES = [1, 4, 8];
@@ -17,7 +17,6 @@ let state = createState(specs);
 let running = false;
 let rate = 1;
 let last = 0;
-let runs = loadRuns();
 let powerScale = 1500;
 
 const $ = (id) => document.getElementById(id);
@@ -29,19 +28,6 @@ function loadSpecs() {
     if (saved && typeof saved === "object") return { ...base, ...saved };
   } catch (e) {}
   return base;
-}
-
-function loadRuns() {
-  try {
-    const rows = JSON.parse(localStorage.getItem(KEY) || "[]");
-    return Array.isArray(rows) ? rows : [];
-  } catch (e) {
-    return [];
-  }
-}
-
-function saveRuns() {
-  localStorage.setItem(KEY, JSON.stringify(runs.slice(0, 12)));
 }
 
 function pin() {
@@ -97,6 +83,7 @@ function paintForm() {
   $("o-wind").textContent = s.wind.toFixed(1) + " m/s";
   $("o-plateW").textContent = s.plateW.toFixed(1) + " m";
   $("o-plateH").textContent = s.plateH.toFixed(1) + " m";
+  $("o-area").textContent = (s.plateW * s.plateH).toFixed(1) + " m²";
   $("o-track").textContent = s.track.toFixed(0) + " m";
   $("o-mass").textContent = s.mass.toFixed(0) + " kg";
   const frac = s.outFrac;
@@ -154,89 +141,6 @@ function paint() {
   draw($("view"), state);
 }
 
-function changedBits(specs) {
-  const d = defaultSpecs();
-  const bits = [];
-  const far = (k, eps = 1e-4) => Math.abs(Number(specs[k]) - Number(d[k])) > eps;
-  if (far("wind")) bits.push(Number(specs.wind).toFixed(1) + " m/s");
-  if (far("plateW") || far("plateH")) {
-    bits.push(Number(specs.plateW).toFixed(1) + "×" + Number(specs.plateH).toFixed(1) + " m");
-  }
-  if (far("track")) bits.push(Number(specs.track).toFixed(0) + " m track");
-  if (far("mass")) bits.push(Number(specs.mass).toFixed(0) + " kg");
-  if (far("outFrac", 0.008)) bits.push("out " + Number(specs.outFrac).toFixed(2));
-  if (far("vReturn")) bits.push("ret " + Number(specs.vReturn).toFixed(1));
-  if (far("turn")) bits.push("turn " + Number(specs.turn).toFixed(1) + " s");
-  if (far("fMax")) bits.push(Number(specs.fMax).toFixed(0) + " N");
-  if (far("cd", 0.01)) bits.push("Cd " + Number(specs.cd).toFixed(2));
-  if (far("eta", 0.005)) bits.push(Math.round(Number(specs.eta) * 100) + "%");
-  if (far("crr", 0.0005)) bits.push("roll " + Number(specs.crr).toFixed(3));
-  return bits.length ? bits.join(" · ") : "defaults";
-}
-
-function paintRuns() {
-  const host = $("runs");
-  host.replaceChildren();
-  if (!runs.length) {
-    const p = document.createElement("p");
-    p.className = "substat";
-    p.textContent = "Stop a run to keep it.";
-    host.appendChild(p);
-    return;
-  }
-  runs.forEach((row, i) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "run";
-    const area = row.plateW * row.plateH;
-    const gen = row.gen || 0;
-    const mot = row.mot || 0;
-    const hold = row.hold || 0;
-    btn.innerHTML =
-      "<b>" + fmtKJ(row.net) + "</b> · " + Math.round(row.avg) + " W avg" +
-      '<span class="meta">' +
-      fmtKJ(gen) + " made · " + fmtKJ(-mot) + " home · " + fmtKJ(-hold) + " hold" +
-      "</span>" +
-      '<span class="meta">' +
-      row.cycles + " cyc · " + row.seconds.toFixed(0) + " s · " + area.toFixed(1) + " m² · " +
-      changedBits(row.specs || row) +
-      "</span>";
-    btn.addEventListener("click", () => {
-      if (running) return;
-      specs = { ...defaultSpecs(), ...row.specs };
-      state = createState(specs);
-      fillForm();
-      paint();
-    });
-    host.appendChild(btn);
-    void i;
-  });
-}
-
-function record() {
-  if (state.time < 0.4) return;
-  const net = netOf(state);
-  const row = {
-    specs: { ...state.specs },
-    wind: state.specs.wind,
-    plateW: state.specs.plateW,
-    plateH: state.specs.plateH,
-    mass: state.specs.mass,
-    vReturn: state.specs.vReturn,
-    cycles: state.cycles,
-    seconds: state.time,
-    net,
-    gen: state.gen,
-    mot: state.mot,
-    hold: state.hold,
-    avg: net / state.time,
-  };
-  runs.unshift(row);
-  runs = runs.slice(0, 12);
-  saveRuns();
-  paintRuns();
-}
-
 function frame(t) {
   if (running) {
     const dt = last ? Math.min(0.05, (t - last) / 1000) : 0;
@@ -266,19 +170,31 @@ function setRunning(on) {
     $("run").className = "stop";
   } else {
     running = false;
-    record();
     $("run").textContent = "Run";
     $("run").className = "go";
   }
+}
+
+function closeSheet() {
+  $("sheet").hidden = true;
 }
 
 $("run").addEventListener("click", () => setRunning(!running));
 $("specs-btn").addEventListener("click", () => {
   $("sheet").hidden = !$("sheet").hidden;
 });
-$("close-specs").addEventListener("click", () => {
-  $("sheet").hidden = true;
-});
+$("close-specs").addEventListener("click", closeSheet);
+document.addEventListener(
+  "pointerdown",
+  (e) => {
+    const sheet = $("sheet");
+    if (sheet.hidden) return;
+    if (sheet.contains(e.target)) return;
+    if ($("specs-btn").contains(e.target)) return;
+    closeSheet();
+  },
+  true
+);
 $("defaults").addEventListener("click", () => {
   if (running) return;
   specs = defaultSpecs();
@@ -303,8 +219,11 @@ for (const id of FIELDS) {
 }
 
 fillForm();
-paintRuns();
 pin();
+bindCam($("view"), () => {
+  $("cam-hint")?.classList.add("is-gone");
+  if (!running) paint();
+});
 paint();
 window.addEventListener("resize", pin);
 window.visualViewport?.addEventListener("resize", pin);

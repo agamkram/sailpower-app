@@ -1,0 +1,28 @@
+WindCart timing recipes
+Remeasured together in sim.js. Wind 10 m/s, sail 5×2 m, 40 kg, rail 1000 N, track 20 m.
+Three steady cycles after the first. Average is net energy divided by cycle time, including time sitting still.
+Recipes 1–4 and 6 use a 1 s slew. Recipe 5 uses 0.5 s.
+
+1. Stop, then turn
+   Face-on until the brake. Stop. Slew. Edge-on home. Stop. Slew back. Coils clipped.
+   4.72 kJ/cycle · 422 W · 11.2 s · parked 1.92 s · made 6.67 · motor 1.90 · hold 0.05
+
+2. Turn while slowing
+   Slew starts about a second early, both ends. Stiff coil command, then clipped.
+   3.54 kJ/cycle · 381 W · 9.3 s · parked 0.06 s · made 6.21 · motor 2.66 · hold 0.01
+
+3. Turn while slowing, coil limit
+   Same early slew. Command never asks for more acceleration than the coils can make.
+   4.06 kJ/cycle · 403 W · 10.1 s · parked 0.46 s · made 5.96 · motor 1.88 · hold 0.02
+
+4. Brake, then finish the turn
+   Face-on until the real brake. Turn during the brake, finish at the cap. Coils limited.
+   4.50 kJ/cycle · 461 W · 9.8 s · parked 1.17 s · made 6.43 · motor 1.90 · hold 0.03
+
+5. Turn on the way in
+   Half-second slew, started so it finishes as the cart stops. Coils limited.
+   3.85 kJ/cycle · 442 W · 8.7 s · parked 0.08 s · made 5.95 · motor 2.10 · hold 0.00
+
+6. Slower outbound
+   Recipe 4 timing. Outbound 2.8 m/s instead of one-third of the wind. Coils limited.
+   5.35 kJ/cycle · 497 W · 10.8 s · parked 1.16 s · made 7.29 · motor 1.90 · hold 0.03
