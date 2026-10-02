@@ -224,6 +224,46 @@ header h1 {
 .net { font-size: 0.78rem; color: var(--text); }
 .substat { font-size: 0.68rem; color: var(--muted); }
 
+.plan {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.chips {
+  display: flex;
+  gap: 0.25rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.chips::-webkit-scrollbar { display: none; }
+
+.chip {
+  flex: 0 0 auto;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.64rem;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.chip.on {
+  background: #1c3f68;
+  border-color: rgba(61, 156, 245, 0.45);
+  color: var(--text);
+}
+
+.plan-note {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 0.56rem;
+  letter-spacing: -0.01em;
+  color: var(--muted);
+  min-height: 1em;
+  line-height: 1.25;
+}
+
 .actions {
   flex: 0 0 auto;
   padding-bottom: max(0.35rem, var(--safe-b));

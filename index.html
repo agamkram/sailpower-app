@@ -86,7 +86,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=IBM+Plex+Mono:wght@500;600&family=Michroma&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=65" />
+  <link rel="stylesheet" href="styles.css?v=67" />
 </head>
 <body>
   <div class="fit-stage" id="fit-stage">
@@ -118,6 +118,11 @@
           <span class="substat" id="substat">0 cycles</span>
         </div>
         <p class="warn" id="warn"></p>
+      </section>
+
+      <section class="plan" aria-label="Rotation plan">
+        <div class="chips" id="plan-chips" role="radiogroup" aria-label="When the sail turns"></div>
+        <p class="plan-note" id="plan-note"></p>
       </section>
 
       <div class="actions">
@@ -168,12 +173,13 @@
           <input id="crr" type="range" min="0.001" max="0.04" step="0.001" />
         </label>
         <div class="sheet-actions">
+          <button type="button" id="solve">Solve</button>
           <button type="button" id="defaults">Defaults</button>
           <button type="button" class="primary" id="close-specs">Done</button>
         </div>
       </form>
     </div>
   </div>
-  <script type="module" src="app.js?v=65"></script>
+  <script type="module" src="app.js?v=67"></script>
 </body>
 </html>

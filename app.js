@@ -4,12 +4,17 @@ import {
   fitError,
   netOf,
   phaseLabel,
+  planInfo,
+  PRESETS,
   rig,
+  solvePlan,
   step,
 } from "./sim.js";
 import { draw, bindCam } from "./view.js";
 
-const KEY = "windcart-runs-v1";
+// v2: mass became chassis-only and eta became converter-only, so specs saved
+// under v1 would quietly describe a different machine.
+const KEY = "windcart-v2";
 const RATES = [1, 4, 8];
 const FIELDS = ["wind", "plateW", "plateH", "track", "mass", "outFrac", "vReturn", "turn", "fMax", "cd", "eta", "crr"];
 
@@ -98,6 +103,40 @@ function paintForm() {
   $("o-eta").textContent = Math.round(s.eta * 100) + "%";
   $("o-crr").textContent = s.crr.toFixed(3);
   $("warn").textContent = fitError(s);
+  paintPlan(s);
+}
+
+function paintPlan(s) {
+  const lead = s.turnLead ?? 0;
+  for (const btn of $("plan-chips").children) {
+    const on = Math.abs(Number(btn.dataset.lead) - lead) < 0.01;
+    btn.classList.toggle("on", on);
+    btn.setAttribute("aria-checked", on ? "true" : "false");
+  }
+  const p = planInfo(s);
+  $("plan-note").textContent =
+    `turn ${p.turn.toFixed(2)}s · lead ${p.lead.toFixed(2)}s · ` +
+    `brake ${p.brakeM.toFixed(1)}m · ${Math.round(p.torqueNm)} Nm`;
+}
+
+function buildPlan() {
+  const host = $("plan-chips");
+  host.replaceChildren();
+  for (const p of PRESETS) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "chip";
+    btn.textContent = p.name;
+    btn.dataset.lead = String(p.turnLead);
+    btn.setAttribute("role", "radio");
+    btn.addEventListener("click", () => {
+      specs = { ...specs, turnLead: p.turnLead };
+      if (!running) state = createState(specs);
+      paintPlan(specs);
+      paint();
+    });
+    host.appendChild(btn);
+  }
 }
 
 function fmtW(w) {
@@ -114,6 +153,9 @@ function fmtKJ(j) {
 function paint() {
   const err = fitError(state.specs);
   let label = running ? phaseLabel(state.phase) : err || "Ready";
+  if (running && state.feather > 0.02) {
+    label += " · feathered " + Math.round((state.feather * 180) / Math.PI) + "°";
+  }
   if (running && state.slip) label += " · slipping";
   $("phase").textContent = label;
   $("speed").textContent = state.vx.toFixed(1) + " m/s";
@@ -204,6 +246,25 @@ $("defaults").addEventListener("click", () => {
   fillForm();
   paint();
 });
+$("solve").addEventListener("click", async () => {
+  if (running) return;
+  const btn = $("solve");
+  btn.textContent = "Solving";
+  btn.disabled = true;
+  await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+  try {
+    const base = readForm();
+    const plan = solvePlan(base);
+    specs = { ...base, outFrac: plan.outFrac, turn: plan.turn, turnLead: plan.turnLead };
+    state = createState(specs);
+    fillForm();
+    paint();
+    $("warn").textContent = "Best found: " + Math.round(plan.avgW) + " W average";
+  } finally {
+    btn.textContent = "Solve";
+    btn.disabled = false;
+  }
+});
 $("rate").addEventListener("click", () => {
   const i = RATES.indexOf(rate);
   rate = RATES[(i + 1) % RATES.length];
@@ -220,6 +281,7 @@ for (const id of FIELDS) {
   });
 }
 
+buildPlan();
 fillForm();
 pin();
 bindCam($("view"), () => {

@@ -1,89 +1,111 @@
-WindCart rotation plan
-Wind 10 m/s, sail 5x2 m, 40 kg, rail 1000 N, track 20 m. Three steady cycles
-after the first. Average is net energy over cycle time, including time at rest.
+WindCart model notes
+Wind 10 m/s, sail 5x2 m, 24 kg chassis plus a 16 kg sail, rail 1000 N,
+track 20 m. Figures are three steady cycles after the first, averaged over the
+whole cycle including time at rest.
 
-The six named recipes are gone. They were not six rotation rules: they mixed
-three knobs at once, and the one that won on paper, "slower outbound" at 497 W,
-was another recipe at a different cruise speed with identical turn timing.
+The rotation plan
+-----------------
+The six named recipes are gone. They were never six rotation rules: they mixed
+three knobs at once, and the one that won on paper was another recipe at a
+different cruise speed with identical turn timing. Three of them were also
+handed a widened braking zone so they had room to turn in, so "turn two
+seconds early" never meant that.
 
-A rotation plan is now two numbers, and cruise speed is a spec slider, not part
-of the plan.
+A plan is now two numbers, and cruise speed is a spec, not part of the plan.
 
-  turn      how long the 90 degree slew takes, seconds
+  turn      how long the 90 degree slew takes
   turnLead  how many seconds before the cart reaches rest the slew begins
-            0            turn only after the cart has stopped
+            0            turn only once stopped
             = turn       the slew finishes exactly as the cart stops
             > turn       the slew finishes while the cart is still moving
 
-Braking now starts where the stopping distance says it must. No plan is handed
-extra room to turn in, which is what three of the old recipes were quietly given.
+Braking starts where the stopping distance says it must. The lead reaches back
+into the cruise, so a long lead really does turn the sail while it is still
+making power, and the numbers show what that costs.
 
 Presets vary turnLead alone, so the selector compares turn timing and nothing
-else. At turn 1 s, outFrac 1/3:
+else. Everything else is a spec slider.
 
-  Turn once stopped       lead 0.00    443 W
-  Finish as it stops      lead 0.25    460 W   <- default
-  Turn while slowing      lead 0.50    453 W
-  Turn before the brake   lead 1.00   -120 W
+Forces and losses
+-----------------
+Carried:
 
-Going edge-on before the brake throws away the end of the power stroke, and
-coming face-on early means motoring home into a loaded sail. The cliff is real.
+  aero        flat plate, cos^2 law on yaw, plus edge and skin terms
+  Cd          Hoerner's fit, 1.1 + 0.02(AR + 1/AR). A square plate is the
+              bluffest at 1.14, slenderness lifts it to 1.30 by AR 10. The Cd
+              spec is a trim around that, not the value
+  yaw inertia m*w^2/12 about the vertical pivot, width squared
+  added air   rho*(pi/4)*c^2*b with a slenderness factor, acting as cos^2 of
+              yaw. Conservative, so it moves timing and peak force, not energy
+  slew work   spin-up through the motor, aero torque against the loaded plate,
+              and no recovery on spin-down because a geared slew drive is not
+              back-drivable. slewRegen buys that back if the drive is direct
+  droop       motoring force falls as back-EMF rises and reaches zero at
+              vNoLoad. Braking is thermal only, so it keeps the full 1000 N
+  copper      cuMax*(F/fMax)^2 at every speed, not only while parked
+  iron        ironRef*(v/10)^2
+  rolling     crr against weight plus the sail thrust reacted through the
+              guide rollers, which at 10 m/s is about twice the weight
+  end stops   kinetic energy absorbed by a stop is charged, not deleted
+  feathering  the sail never comes further into the wind than the rail can
+              hold against
 
-Sail shape is now part of the physics
--------------------------------------
-The model used to see area and nothing else, so it could not tell a 5x2 sail
-from a 2x5 one. Three shape effects are now carried:
+Budget at the default, in watts:
 
-  Cd        Hoerner's fit for a rectangular plate, 1.1 + 0.02(AR + 1/AR).
-            A square plate is the bluffest shape at Cd 1.14; slenderness
-            raises it to about 1.30 by AR 10. The Cd spec is now a trim
-            around that, not the value itself.
-  inertia   yaw inertia m*w^2/12 about the vertical pivot. Width squared, so
-            this is the term that separates wide sails from tall ones.
-  added air rho*(pi/4)*c^2*b with a slenderness factor. Conservative, so it
-            moves timing and peak force rather than net energy.
+  made          713
+  motor home   -147
+  slew drive    -50
+  copper+iron   -26
+  end stops      -4
+  net           487     cycle 11.6 s, coils saturated 1% of the time
 
-Slew work is charged: spin the sail up to rate through the motor, recover on
-the way down through the generator, plus the aero torque turned against while
-the plate is still loaded. Mass is now chassis plus sail, where the sail is
-1.6 kg/m^2, so growing the sail adds weight as well as area.
+Not carried: wind shear and gusts, unsteady aerodynamics beyond added mass,
+side force and the overturning moment on the guide wheels, sail flex, thermal
+derating, and any cost for the structure itself.
 
-At a constant 10 m2 and a 1 s slew:
-
-  sail        AR     Cd   I kg m2   peak Nm   slew W   net W
-  1.00x10.00 10.0  1.302      1.3         8       10     438
-  2.00x5.00   2.5  1.158      5.3        34       17     383
-  3.16x3.16   1.0  1.140     13.3        84       27     370
-  5.00x2.00   2.5  1.158     33.3       209       45     364
-  10.00x1.00 10.0  1.302    133.3       838      105     368
-
-1x10 and 10x1 have identical area and identical Cd and differ by 70 W. All of
-it is yaw inertia. Tall and narrow wins: it is the bluffer shape and it is
-cheap to turn.
-
-The slew optimum is now interior and depends on shape, which is the point:
-5x2 peaks near 0.5 s, 2x5 near 0.3 s, 10x1 near 0.75 s. Asking a 10 m wide
-sail for a 0.2 s turn costs more than the machine makes.
-
-Still open
+Sail shape
 ----------
-1. Cruise speed is worth more than rotation. Holding the plan fixed and
-   sweeping outbound speed spans 378 to 511 W, and the best is about 2.2 m/s,
-   not the one third of wind speed the defaults use. Classic drag-device theory
-   puts the peak at U/3 for the power stroke alone, but the return trip and the
-   time at rest are fixed overhead, so a slower outbound spreads that overhead
-   across more generating time. The optimum moves with the other specs, so it
-   wants solving, not hardcoding.
+The model used to see area and nothing else, so it could not tell a 5x2 sail
+from a 2x5. At a constant 10 m2, with the plan solved for each shape:
 
-2. Control authority. The coils saturate near 1000 N, which the sail passes at
-   about 12 m/s of wind. Past that the cycle is 75% force-limited and the
-   numbers describe the clip, not the wind. Above about 16 m/s it deadlocks:
-   a real machine would feather to shed load and this controller only turns at
-   the ends.
+  sail        AR     Cd   I kg m2   turn s   net W
+  1.00x10.00 10.0  1.302      1.3     0.30     607
+  2.00x5.00   2.5  1.158      5.3     0.40     527
+  3.16x3.16   1.0  1.140     13.3     0.50     504
+  5.00x2.00   2.5  1.158     33.3     0.70     487
+  10.00x1.00 10.0  1.302    133.3     1.00     483
 
-3. The machine model is still idealised. fMax is flat against speed where a
-   real linear generator droops, copper loss is charged only below 0.08 m/s
-   with a flat 85% everywhere else, and rolling resistance follows weight
-   while ignoring the aero reaction through the guide wheels, which runs about
-   twice the weight. End stops also delete 1 to 3 percent of net energy by
-   clamping velocity to zero, which quietly rewards configs that cannot brake.
+1x10 and 10x1 have identical area and identical Cd and differ by 124 W. All of
+it is yaw inertia. Tall and narrow wins twice over: it is the bluffer shape and
+it is cheap to turn. The best slew time tracks inertia, from 0.30 s for the
+slender sail to 1.00 s for the wide one.
+
+Cruise speed
+------------
+The optimum outbound is about 0.24 of wind speed, not the one third the old
+defaults used. Drag-device theory puts the peak at U/3 for the power stroke
+alone, but the return trip and the time at rest are fixed overhead, so a slower
+outbound spreads that overhead across more generating time. It moves with the
+other specs, which is why Solve exists rather than a hardcoded number.
+
+Above rated wind
+----------------
+A 10 m2 sail out-pushes a 1000 N rail at about 12 m/s. The machine now sheds
+the excess by feathering instead of stalling:
+
+  wind   face-on N   feather
+     8         457        0 deg
+    12        1028       20 deg
+    16        1828       45 deg
+    20        2857       56 deg
+    25        4464       63 deg
+    30        6428       68 deg
+
+Power keeps climbing but Cp collapses, from 46% of the drag-device ceiling at
+10 m/s to 5% at 25 m/s, which is what a force-limited machine should do.
+
+Sanity
+------
+Cp never exceeds 4/27*Cd anywhere in the config space. The best case found is
+54% of that ceiling, on a 40 m track. Nothing stalls between 4 and 30 m/s of
+wind, 0.5 to 32 m2 of sail, 8 to 40 m of track, or 300 to 3000 N of rail.
