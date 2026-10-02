@@ -1,6 +1,6 @@
 /** Side view of the machine. Face-on sail is the thin plate. Edge-on sail faces the camera. */
 
-import { stroke } from "./sim.js?v=82";
+import { stroke } from "./sim.js?v=83";
 
 function sub(a, b) {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -381,10 +381,11 @@ export function draw(canvas, st) {
   const rail0 = Math.max(cap0, x0);
   const rail1 = Math.min(cap1, x1);
 
+  // Keep every rung. Dropping the ones near the cart made the ladder vanish
+  // under the bogie and pop back in once it had passed.
   const rungPitch = 0.4;
   for (let x = Math.ceil(rail0 / rungPitch) * rungPitch; x < rail1; x += rungPitch) {
     if (x < cap0 + 0.05 || x > cap1 - 0.05) continue;
-    if (Math.abs(x - bx) < 0.36) continue;
     wheel([x, railY - 0.012, 0], "z", 0.02, gauge - railR * 2 - 0.02, RUNG, 0, false, true, 2, true);
   }
 
