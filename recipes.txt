@@ -121,12 +121,20 @@ that is the only place the sail sheds load:
     16        1828        43 deg    1527
     20        2857        55 deg    1667
     25        4464        59 deg    2070
-    30        6428        55 deg    2274
+    30        6428        55 deg    2268
 
 Nothing feathers below about 14 m/s even though the sail passed the rail force
 at 12, because the cart is moving by the time it matters and the apparent wind
 has dropped. Power keeps climbing while Cp collapses, which is what a
 force-limited machine should do.
+
+On the way home the arrival slew stops at the angle the motor can still creep
+against. Opening past that used to blow the cart back down the track, and the
+turn was then commanded shut, so the last stretch home was taken edge-on at
+about 0.05 m/s. That is what cut "while slowing" from about 2200 W to about
+900 W above 24 m/s, and "done on arrival" with it. The rest of the turn now
+happens at the cap. At 30 m/s the four presets are 2139, 2261, 2346 and 2164 W.
+Opening earlier still costs motor work. It no longer stalls the cycle.
 
 Sanity
 ------

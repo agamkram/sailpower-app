@@ -57,6 +57,27 @@ export function featherFloor(s, vx) {
   return Math.acos(Math.sqrt(clamp(cap / full, 0, 1)));
 }
 
+/**
+ * Most face-on the sail may be while the cart still has to reach the home cap.
+ * Opening past this lets the wind blow the cart back down the track, the
+ * time-to-arrival goes infinite, and the turn is commanded shut, so the last
+ * stretch home is taken edge-on at a crawl. The rest of the turn happens at
+ * the cap, which is where a strong wind is allowed to start the power stroke.
+ */
+function approachYaw(s, vx) {
+  const r = rig(s);
+  // Upwind of a crawl, the force toward home is the motoring limit and it
+  // droops with speed. Once the cart has stopped or been blown the other way,
+  // holding is the full brake.
+  const towardHome = vx < -0.05 ? forceLimit(s, vx, true) : forceLimit(s, vx, false);
+  const spare = Math.max(0, towardHome - r.total * 9.81 * (s.crr ?? 0) - 60);
+  const vRel = vx - s.wind;
+  const q = 0.5 * s.rho * vRel * vRel;
+  const full = q * r.cd * r.area;
+  if (full <= spare || full <= 0) return 0;
+  return Math.acos(Math.sqrt(clamp(spare / full, 0, 1)));
+}
+
 /** Centre-of-pressure offset as a fraction of chord, for the slew torque. */
 const SLEW_CP = 0.1;
 
@@ -306,7 +327,8 @@ function sub(st, dt) {
   if (phase === "out" || phase === "brakeOut") {
     st.alpha = drive(timeToRest(hi - st.x, st.vx, brake) <= lead ? Math.PI / 2 : 0);
   } else if (phase === "back" || phase === "brakeBack") {
-    st.alpha = drive(timeToRest(st.x - lo, -st.vx, brake) <= lead ? 0 : Math.PI / 2);
+    const arriving = timeToRest(st.x - lo, -st.vx, brake) <= lead;
+    st.alpha = drive(arriving ? approachYaw(s, st.vx) : Math.PI / 2);
   } else if (phase === "turnEdge") {
     st.alpha = Math.min(Math.PI / 2, st.alpha + turnRate * dt);
   } else if (phase === "turnFace") {
@@ -369,10 +391,15 @@ function sub(st, dt) {
     else if (phase === "back") aDes = 4 * (-Math.abs(s.vReturn) - st.vx);
     else if (phase === "brakeOut" || phase === "turnEdge") {
       const gap = hi - st.x;
-      aDes = st.vx > 0.05 ? -(st.vx * st.vx) / (2 * Math.max(0.12, gap)) : 4 * (creep(gap) - st.vx);
+      const vClose = creep(gap);
+      // The stop-at-the-cap profile and the creep used to switch at 0.05 m/s,
+      // below the creep itself, so each undid the other and the last fraction
+      // of a metre took several seconds.
+      aDes = st.vx > vClose ? -(st.vx * st.vx) / (2 * Math.max(0.12, gap)) : 4 * (vClose - st.vx);
     } else {
       const gap = st.x - lo;
-      aDes = st.vx < -0.05 ? (st.vx * st.vx) / (2 * Math.max(0.12, gap)) : 4 * (-creep(gap) - st.vx);
+      const vClose = creep(gap);
+      aDes = st.vx < -vClose ? (st.vx * st.vx) / (2 * Math.max(0.12, gap)) : 4 * (-vClose - st.vx);
     }
     const up = st.vx >= 0 ? forceLimit(s, st.vx, true) : forceLimit(s, st.vx, false);
     const dn = st.vx >= 0 ? forceLimit(s, st.vx, false) : forceLimit(s, st.vx, true);
