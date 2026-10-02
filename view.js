@@ -1,6 +1,6 @@
 /** Side view of the machine. Face-on sail is the thin plate. Edge-on sail faces the camera. */
 
-import { stroke } from "./sim.js?v=102";
+import { stroke } from "./sim.js?v=103";
 
 function sub(a, b) {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -15,12 +15,6 @@ function norm(a) {
   const n = Math.hypot(a[0], a[1], a[2]) || 1;
   return [a[0] / n, a[1] / n, a[2] / n];
 }
-function hash2(i, j) {
-  let n = (i * 374761393 + j * 668265263) | 0;
-  n = Math.imul(n ^ (n >>> 13), 1274126177);
-  return ((n ^ (n >>> 16)) >>> 0) / 4294967296;
-}
-
 function hex(n) {
   const r = (n >> 16) & 255;
   const g = (n >> 8) & 255;
@@ -45,7 +39,7 @@ const FRAME = 0x8b97a6;
 const FRAME_DK = 0x66717f;
 const WHEEL = 0xd7dee8;
 const HUB = 0x1b212b;
-const PLATE = 0x2e3236;
+const PLATE = 0x1a1d20;
 const MOTOR = 0x3e4a5c;
 const MOTOR_CAP = 0x1a212b;
 const RING = 0xb7c0ca;
@@ -61,7 +55,6 @@ let followX = null;
 // solved field, so these move at that speed and nothing else. While the sim
 // is running they share its clock, including the rate button. While it is
 // paused they keep drifting on the wall clock so the slider still shows.
-const sailFlecks = [];
 const windParts = [];
 const windDraw = [];
 let windWall = 0;
@@ -600,7 +593,7 @@ export function draw(canvas, st) {
     // near border as a charcoal line.
     const facingFront = c * (cam.eye[0] - bx) + sn * cam.eye[2] >= 0;
     const xSkin = facingFront ? hx : -hx;
-    const tone = facingFront ? 1 : 0.9;
+    const tone = 1;
     for (let i = 0; i < strips; i++) {
       let z0 = -hz + (i / strips) * s.plateW;
       let z1 = -hz + ((i + 1) / strips) * s.plateW;
@@ -610,29 +603,6 @@ export function draw(canvas, st) {
         ? [corner(xSkin, -hy, z0), corner(xSkin, -hy, z1), corner(xSkin, hy, z1), corner(xSkin, hy, z0)]
         : [corner(xSkin, -hy, z0), corner(xSkin, hy, z0), corner(xSkin, hy, z1), corner(xSkin, -hy, z1)];
       add(skin, shade(PLATE, tone));
-    }
-    // Even chopped-fiber speckle, stuck to the plate. A screen pattern would
-    // slide when the sail turns.
-    sailFlecks.length = 0;
-    const step = 0.085;
-    const cols = Math.max(2, Math.round(s.plateW / step));
-    const rows = Math.max(2, Math.round(s.plateH / step));
-    for (let j = 0; j < rows; j++) {
-      for (let i = 0; i < cols; i++) {
-        const u = (i + hash2(i, j)) / cols;
-        const v = (j + hash2(j + 5, i + 2)) / rows;
-        if (u <= 0.02 || u >= 0.98 || v <= 0.02 || v >= 0.98) continue;
-        const z = u * s.plateW - hz;
-        const y = v * s.plateH - hy;
-        const q = project(corner(xSkin, y, z));
-        if (!q || q.z < 0.4) continue;
-        const h = hash2(i + 9, j + 4);
-        sailFlecks.push({
-          x: q.x,
-          y: q.y,
-          ink: h < 0.55 ? "#6a7074" : "#16181a",
-        });
-      }
     }
   }
 
@@ -767,13 +737,6 @@ export function draw(canvas, st) {
     ctx.fillStyle = hex(poly.color);
     ctx.fill();
   }
-
-  ctx.save();
-  for (const f of sailFlecks) {
-    ctx.fillStyle = f.ink;
-    ctx.fillRect(f.x - 0.5, f.y - 0.5, 1, 1);
-  }
-  ctx.restore();
 
   // Grains that have spilled past the plate and sit closer than it.
   ctx.save();
