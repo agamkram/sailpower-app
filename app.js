@@ -4,6 +4,7 @@ import {
   fitError,
   netOf,
   phaseLabel,
+  rig,
   step,
 } from "./sim.js";
 import { draw, bindCam } from "./view.js";
@@ -85,14 +86,15 @@ function paintForm() {
   $("o-plateH").textContent = s.plateH.toFixed(1) + " m";
   $("o-area").textContent = (s.plateW * s.plateH).toFixed(1) + " m²";
   $("o-track").textContent = s.track.toFixed(0) + " m";
-  $("o-mass").textContent = s.mass.toFixed(0) + " kg";
+  const r = rig(s);
+  $("o-mass").textContent = s.mass.toFixed(0) + " kg · " + r.total.toFixed(0) + " all up";
   const frac = s.outFrac;
   $("o-outFrac").textContent =
     Math.abs(frac - 1 / 3) < 0.012 ? "1/3 wind" : (frac * s.wind).toFixed(1) + " m/s";
   $("o-vReturn").textContent = s.vReturn.toFixed(1) + " m/s";
   $("o-turn").textContent = s.turn.toFixed(1) + " s";
   $("o-fMax").textContent = s.fMax.toFixed(0) + " N";
-  $("o-cd").textContent = s.cd.toFixed(2);
+  $("o-cd").textContent = r.cd.toFixed(2);
   $("o-eta").textContent = Math.round(s.eta * 100) + "%";
   $("o-crr").textContent = s.crr.toFixed(3);
   $("warn").textContent = fitError(s);

@@ -7,11 +7,12 @@ export function defaultSpecs() {
     gauge: 1,
     plateW: 5,
     plateH: 2,
-    mass: 40,
+    mass: 24,
+    sailRho: 1.6,
     cd: 1.28,
     rho: 1.225,
     thickness: 0.006,
-    turn: 1,
+    turn: 0.5,
     turnLead: 0.25,
     coilMode: "limited",
     fMax: 1000,
@@ -23,6 +24,38 @@ export function defaultSpecs() {
     cuMax: 120,
     eta: 0.85,
   };
+}
+
+/** Centre-of-pressure offset as a fraction of chord, for the slew torque. */
+const SLEW_CP = 0.1;
+
+/**
+ * Everything that follows from the sail's shape rather than just its area.
+ * Two sails of equal area behave differently: a wide one is far harder to yaw,
+ * a slender one is a bluffer body, and a stubby one drags more air with it.
+ *
+ * cd       Hoerner's fit for a rectangular plate normal to the flow, with the
+ *          Cd spec acting as a trim around the 1.28 reference.
+ * inertia  yaw inertia about the vertical pivot, m*w^2/12. Scales with width
+ *          squared, so this is what separates a 5x2 sail from a 2x5 one.
+ * added    air entrained when the plate moves normal to itself. Conservative,
+ *          so it shifts timing and peak force rather than net energy.
+ */
+export function rig(s) {
+  const area = s.plateW * s.plateH;
+  const span = Math.max(s.plateW, s.plateH);
+  const chord = Math.min(s.plateW, s.plateH);
+  const ar = Math.min(20, Math.max(1, chord > 0 ? span / chord : 1));
+  const cd = Math.min(2, 1.1 + 0.02 * (ar + 1 / ar)) * (s.cd / 1.28);
+  const sailMass = (s.sailRho ?? 1.6) * area;
+  const inertia = (sailMass * s.plateW * s.plateW) / 12;
+  const added = s.rho * (Math.PI / 4) * chord * chord * span * (1 - 0.42 / ar ** 0.8);
+  return { area, ar, cd, sailMass, total: s.mass + sailMass, inertia, added };
+}
+
+/** Peak torque a real accelerate-then-decelerate slew would need, N m. */
+export function slewTorque(s) {
+  return (rig(s).inertia * 2 * Math.PI) / Math.max(0.15, s.turn) ** 2;
 }
 
 /**
@@ -82,6 +115,8 @@ export function createState(specs) {
     gen: 0,
     mot: 0,
     hold: 0,
+    slew: 0,
+    slewing: false,
     inst: 0,
     force: 0,
     faero: 0,
@@ -90,11 +125,12 @@ export function createState(specs) {
     cycleGen: 0,
     cycleMot: 0,
     cycleHold: 0,
+    cycleSlew: 0,
   };
 }
 
 export function netOf(st) {
-  return st.gen - st.mot - st.hold;
+  return st.gen - st.mot - st.hold - st.slew;
 }
 
 function clamp(v, a, b) {
@@ -112,25 +148,32 @@ export function aeroForce(s, vx, alpha) {
   const sp = Math.abs(vRel);
   const q = 0.5 * s.rho * sp * sp;
   const dir = vRel < 0 ? 1 : vRel > 0 ? -1 : 0;
-  const area = s.plateW * s.plateH;
+  const r = rig(s);
   const c = Math.cos(alpha);
   const sn = Math.sin(alpha);
-  const face = dir * q * s.cd * area * c * c;
+  const face = dir * q * r.cd * r.area * c * c;
   const edge = dir * q * 1.2 * (s.thickness * s.plateH) * sn * sn;
-  const skin = dir * q * 0.008 * area;
+  const skin = dir * q * 0.008 * r.area;
   return face + edge + skin;
+}
+
+/** Moving mass including the slug of air the plate carries when face-on. */
+function movingMass(s, alpha) {
+  const r = rig(s);
+  const c = Math.cos(alpha);
+  return r.total + r.added * c * c;
 }
 
 function rollForce(s, vx) {
   if (Math.abs(vx) < 0.02) return 0;
-  return -Math.sign(vx) * s.crr * s.mass * 9.81;
+  return -Math.sign(vx) * s.crr * rig(s).total * 9.81;
 }
 
-function brakeDist(s, speed, fa) {
+function brakeDist(s, speed, fa, mEff) {
   const push = speed >= 0 ? Math.max(0, fa) : Math.max(0, -fa);
   const net = s.fMax - push;
   if (net < 40) return Math.abs(speed) > 0.4 ? 1e6 : 0.15;
-  const a = (net / Math.max(5, s.mass)) * 0.85;
+  const a = (net / Math.max(5, mEff)) * 0.85;
   return (speed * speed) / (2 * a) + 0.3;
 }
 
@@ -160,7 +203,10 @@ function sub(st, dt) {
   const vOut = s.wind * s.outFrac;
   const turnRate = (Math.PI / 2) / turnSec;
   const stiff = s.coilMode === "stiff";
-  const brake = brakeDist(s, st.vx, fa);
+  const rg = rig(s);
+  const mEff = movingMass(s, st.alpha);
+  const brake = brakeDist(s, st.vx, fa, mEff);
+  const alpha0 = st.alpha;
 
   // Braking starts where the physics says it must: no recipe gets extra room.
   if (phase === "out" && st.vx >= 0 && hi - st.x <= brake) phase = "brakeOut";
@@ -180,17 +226,37 @@ function sub(st, dt) {
     st.alpha = Math.max(0, st.alpha - turnRate * dt);
   }
 
+  // Work the slew drive does: spin the sail up to rate, then recover on the
+  // way down, plus the aero torque it turns against while the plate is loaded.
+  const dAlpha = Math.abs(st.alpha - alpha0);
+  const slewing = dAlpha > 1e-9;
+  const spinKE = 0.5 * rg.inertia * turnRate * turnRate;
+  let slewE = 0;
+  if (slewing && !st.slewing) slewE += spinKE / s.etaM;
+  else if (!slewing && st.slewing) slewE -= spinKE * s.etaG;
+  if (slewing) {
+    const vRel = st.vx - s.wind;
+    const q = 0.5 * s.rho * vRel * vRel;
+    const lever = SLEW_CP * s.plateW;
+    const tAero =
+      q * rg.cd * rg.area * lever * Math.abs(Math.sin(st.alpha) * Math.cos(st.alpha));
+    slewE += (tAero * dAlpha) / s.etaM;
+  }
+  st.slewing = slewing;
+  st.slew += slewE;
+  st.cycleSlew += slewE;
+
   const faNow = aeroForce(s, st.vx, st.alpha);
   let fCmd;
   let coilLimited = false;
   if (stiff) {
     let raw;
-    if (phase === "out") raw = s.mass * 4 * (vOut - st.vx) - faNow - fr;
-    else if (phase === "back") raw = s.mass * 4 * (-Math.abs(s.vReturn) - st.vx) - faNow - fr;
+    if (phase === "out") raw = mEff * 4 * (vOut - st.vx) - faNow - fr;
+    else if (phase === "back") raw = mEff * 4 * (-Math.abs(s.vReturn) - st.vx) - faNow - fr;
     else if (phase === "brakeOut" || phase === "turnEdge") {
-      raw = s.mass * (22 * (hi - st.x) + 9 * (0 - st.vx)) - faNow - fr;
+      raw = mEff * (22 * (hi - st.x) + 9 * (0 - st.vx)) - faNow - fr;
     } else {
-      raw = s.mass * (22 * (lo - st.x) + 9 * (0 - st.vx)) - faNow - fr;
+      raw = mEff * (22 * (lo - st.x) + 9 * (0 - st.vx)) - faNow - fr;
     }
     coilLimited = Math.abs(raw) > s.fMax + 5;
     fCmd = clamp(raw, -s.fMax, s.fMax);
@@ -205,14 +271,14 @@ function sub(st, dt) {
       const dist = Math.max(0.12, st.x - lo);
       aDes = st.vx < -0.05 ? (st.vx * st.vx) / (2 * dist) : 4 * (0 - st.vx);
     }
-    const aMin = (faNow + fr - s.fMax) / s.mass;
-    const aMax = (faNow + fr + s.fMax) / s.mass;
+    const aMin = (faNow + fr - s.fMax) / mEff;
+    const aMax = (faNow + fr + s.fMax) / mEff;
     const aUse = clamp(aDes, aMin, aMax);
     coilLimited = Math.abs(aUse - aDes) > 0.2;
-    fCmd = s.mass * aUse - faNow - fr;
+    fCmd = mEff * aUse - faNow - fr;
   }
 
-  const ax = (faNow + fr + fCmd) / s.mass;
+  const ax = (faNow + fr + fCmd) / mEff;
   st.vx += ax * dt;
   st.x += st.vx * dt;
   if (st.x >= hi) {
@@ -248,10 +314,11 @@ function sub(st, dt) {
       st.alpha = 0;
       phase = "out";
       st.cycles += 1;
-      st.lastCycleNet = st.cycleGen - st.cycleMot - st.cycleHold;
+      st.lastCycleNet = st.cycleGen - st.cycleMot - st.cycleHold - st.cycleSlew;
       st.cycleGen = 0;
       st.cycleMot = 0;
       st.cycleHold = 0;
+      st.cycleSlew = 0;
     } else phase = "turnFace";
   }
 
@@ -275,6 +342,7 @@ function sub(st, dt) {
     st.cycleHold += e;
     inst -= cu;
   }
+  inst -= slewE / dt;
 
   st.phase = phase;
   st.force = fCmd;

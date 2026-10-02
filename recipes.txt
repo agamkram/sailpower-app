@@ -29,28 +29,61 @@ else. At turn 1 s, outFrac 1/3:
 Going edge-on before the brake throws away the end of the power stroke, and
 coming face-on early means motoring home into a loaded sail. The cliff is real.
 
-Two things to settle before these numbers can be trusted
---------------------------------------------------------
-1. The slew is free. There is no cost to turning the sail anywhere in the
-   energy accounting, so the sim always prefers the fastest possible turn.
-   At 0.15 s the optimiser is asking a 5 m sail for 9300 Nm, 21 rad/s, and a
-   52 m/s tip speed. Charging the inertia alone, with a 16 kg sail, moves the
-   best turn from 0.15 s to about 1 s:
+Sail shape is now part of the physics
+-------------------------------------
+The model used to see area and nothing else, so it could not tell a 5x2 sail
+from a 2x5 one. Three shape effects are now carried:
 
-     turn s   sim avgW   slew W   corrected
-       0.15       513     1654       -1141
-       0.25       513      595         -82
-       0.50       490      149         341
-       0.75       465       66         399
-       1.00       443       37         406
-       1.50       403       17         386
+  Cd        Hoerner's fit for a rectangular plate, 1.1 + 0.02(AR + 1/AR).
+            A square plate is the bluffest shape at Cd 1.14; slenderness
+            raises it to about 1.30 by AR 10. The Cd spec is now a trim
+            around that, not the value itself.
+  inertia   yaw inertia m*w^2/12 about the vertical pivot. Width squared, so
+            this is the term that separates wide sails from tall ones.
+  added air rho*(pi/4)*c^2*b with a slenderness factor. Conservative, so it
+            moves timing and peak force rather than net energy.
 
-   Aero torque on the loaded plate is on top of that and is not counted either.
+Slew work is charged: spin the sail up to rate through the motor, recover on
+the way down through the generator, plus the aero torque turned against while
+the plate is still loaded. Mass is now chassis plus sail, where the sail is
+1.6 kg/m^2, so growing the sail adds weight as well as area.
 
-2. Cruise speed is worth more than rotation. Holding the plan fixed and
+At a constant 10 m2 and a 1 s slew:
+
+  sail        AR     Cd   I kg m2   peak Nm   slew W   net W
+  1.00x10.00 10.0  1.302      1.3         8       10     438
+  2.00x5.00   2.5  1.158      5.3        34       17     383
+  3.16x3.16   1.0  1.140     13.3        84       27     370
+  5.00x2.00   2.5  1.158     33.3       209       45     364
+  10.00x1.00 10.0  1.302    133.3       838      105     368
+
+1x10 and 10x1 have identical area and identical Cd and differ by 70 W. All of
+it is yaw inertia. Tall and narrow wins: it is the bluffer shape and it is
+cheap to turn.
+
+The slew optimum is now interior and depends on shape, which is the point:
+5x2 peaks near 0.5 s, 2x5 near 0.3 s, 10x1 near 0.75 s. Asking a 10 m wide
+sail for a 0.2 s turn costs more than the machine makes.
+
+Still open
+----------
+1. Cruise speed is worth more than rotation. Holding the plan fixed and
    sweeping outbound speed spans 378 to 511 W, and the best is about 2.2 m/s,
    not the one third of wind speed the defaults use. Classic drag-device theory
    puts the peak at U/3 for the power stroke alone, but the return trip and the
    time at rest are fixed overhead, so a slower outbound spreads that overhead
    across more generating time. The optimum moves with the other specs, so it
    wants solving, not hardcoding.
+
+2. Control authority. The coils saturate near 1000 N, which the sail passes at
+   about 12 m/s of wind. Past that the cycle is 75% force-limited and the
+   numbers describe the clip, not the wind. Above about 16 m/s it deadlocks:
+   a real machine would feather to shed load and this controller only turns at
+   the ends.
+
+3. The machine model is still idealised. fMax is flat against speed where a
+   real linear generator droops, copper loss is charged only below 0.08 m/s
+   with a flat 85% everywhere else, and rolling resistance follows weight
+   while ignoring the aero reaction through the guide wheels, which runs about
+   twice the weight. End stops also delete 1 to 3 percent of net energy by
+   clamping velocity to zero, which quietly rewards configs that cannot brake.
