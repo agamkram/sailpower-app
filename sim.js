@@ -213,8 +213,12 @@ function rollForce(s, vx, fa) {
 }
 
 function brakeDist(s, speed, fa, mEff) {
-  const push = speed >= 0 ? Math.max(0, fa) : Math.max(0, -fa);
-  const net = forceLimit(s, speed, false) - push;
+  const cap = forceLimit(s, speed, false);
+  // The sail turns away while braking, so never assume it keeps pushing at
+  // full face-on load. Without this the stopping distance blows up and the
+  // cart enters the brake at the top of the stroke.
+  const push = Math.min(speed >= 0 ? Math.max(0, fa) : Math.max(0, -fa), cap * 0.9);
+  const net = cap - push;
   if (net < 40) return Math.abs(speed) > 0.4 ? 1e6 : 0.15;
   const a = (net / Math.max(5, mEff)) * 0.85;
   return (speed * speed) / (2 * a) + 0.3;
@@ -233,6 +237,21 @@ function timeToRest(remaining, speed, brake) {
   if (speed <= 0.05) return 0;
   const r = Math.max(0, remaining);
   return (r + Math.min(r, brake)) / speed;
+}
+
+/** Bank one cycle and start the next. Returns the phase to run from. */
+function closeCycle(st) {
+  st.alpha = 0;
+  st.cycles += 1;
+  st.lastCycleS = st.cycleT;
+  st.cycleT = 0;
+  st.lastCycleNet = st.cycleGen - st.cycleMot - st.cycleSlew - st.cycleLoss - st.cycleStop;
+  st.cycleGen = 0;
+  st.cycleMot = 0;
+  st.cycleSlew = 0;
+  st.cycleLoss = 0;
+  st.cycleStop = 0;
+  return "out";
 }
 
 function sub(st, dt) {
@@ -271,10 +290,12 @@ function sub(st, dt) {
 
   // Shed load rather than stall. The sail can never come further into the wind
   // than the rail can hold against, so in a gale it simply runs part-feathered.
-  // Only call it feathered when the floor is actually holding the sail off the
-  // wind. On the fast return the apparent wind makes the floor non-zero even
-  // though the sail is already edge-on and nothing is being given up.
-  const floor = featherFloor(s, st.vx);
+  // Feathering is a stopping aid, not a cruise setting. Out on the power
+  // stroke a sail that out-pushes the coils simply drives the cart faster
+  // until the forces balance, and shedding that load would be throwing away
+  // the stroke. Stopping at the far cap is where authority actually matters.
+  const mustHold = phase === "brakeOut" || phase === "turnEdge";
+  const floor = mustHold ? featherFloor(s, st.vx) : 0;
   const bound = st.alpha < floor;
   st.feather = bound ? floor : 0;
   if (bound) st.alpha = Math.min(Math.PI / 2, floor);
@@ -382,23 +403,13 @@ function sub(st, dt) {
   } else if ((phase === "brakeBack" || phase === "turnFace") && parked && st.x < lo + 0.08) {
     st.vx = 0;
     st.x = lo;
-    // In a gale the sail never gets all the way back to face-on, so a cycle
-    // closes when it is as far into the wind as the rail will allow.
-    if (st.alpha <= st.feather + 0.05) {
-      st.alpha = st.feather;
-      phase = "out";
-      st.cycles += 1;
-      st.lastCycleS = st.cycleT;
-      st.cycleT = 0;
-      st.lastCycleNet =
-        st.cycleGen - st.cycleMot - st.cycleSlew - st.cycleLoss - st.cycleStop;
-      st.cycleGen = 0;
-      st.cycleMot = 0;
-      st.cycleSlew = 0;
-      st.cycleLoss = 0;
-      st.cycleStop = 0;
-    } else phase = "turnFace";
+    if (st.alpha <= 0.05) phase = closeCycle(st);
+    else phase = "turnFace";
   }
+  // A strong wind pulls the cart off the home cap before the sail is all the
+  // way round. That is the power stroke starting early, not a stall, so the
+  // cycle turns over on sail angle rather than on sitting still at the cap.
+  if (phase === "turnFace" && st.alpha <= 0.05) phase = closeCycle(st);
 
   const mech = -fCmd * st.vx;
   let inst = 0;
