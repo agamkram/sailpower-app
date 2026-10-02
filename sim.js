@@ -91,15 +91,17 @@ export function slewTorque(s) {
 
 /**
  * A rotation plan is two numbers. `turn` is how long the 90° slew takes.
- * `turnLead` is how many seconds before the cart comes to rest the slew starts.
- * lead 0 turns only once stopped; lead === turn finishes exactly at rest;
- * lead > turn finishes while the cart is still moving.
+ * `turnLead` is where that slew sits relative to arrival, as a fraction of its
+ * own length: 0 starts it once the cart is stopped, 1 finishes it exactly as
+ * the cart stops. Measuring it in bare seconds made one setting mild on the
+ * slow outbound run and ruinous on the fast return, where it left the sail
+ * wide open metres from home with the motor still hauling against it.
  */
 export const PRESETS = [
   { id: "stopped", name: "Once stopped", turnLead: 0 },
-  { id: "arrive", name: "As it stops", turnLead: 0.3 },
+  { id: "arrive", name: "Mostly stopped", turnLead: 0.3 },
   { id: "slowing", name: "While slowing", turnLead: 0.6 },
-  { id: "early", name: "Before the brake", turnLead: 1 },
+  { id: "early", name: "Done on arrival", turnLead: 1 },
 ];
 
 export function stroke(s) {
@@ -275,7 +277,7 @@ function sub(st, dt) {
   const fr = rollForce(s, st.vx, fa);
   let phase = st.phase;
   const turnSec = Math.max(0.15, s.turn);
-  const lead = Math.max(0, s.turnLead ?? 0);
+  const lead = clamp(s.turnLead ?? 0, 0, 1) * turnSec;
   const vOut = s.wind * s.outFrac;
   const turnRate = (Math.PI / 2) / turnSec;
   const stiff = s.coilMode === "stiff";
@@ -478,7 +480,7 @@ export function planInfo(s) {
   return {
     vOut,
     turn: Math.max(0.15, s.turn),
-    lead: Math.max(0, s.turnLead ?? 0),
+    lead: clamp(s.turnLead ?? 0, 0, 1) * Math.max(0.15, s.turn),
     brakeM: brakeDist(s, vOut, fa, movingMass(s, 0)),
     torqueNm: slewTorque(s),
   };
@@ -525,7 +527,9 @@ export function score(specs, cycles = 2) {
   const a = st.gen, b = st.mot, c = st.slew, d = st.loss, e = st.stop;
   const target = st.cycles + cycles;
   guard = 0;
-  while (st.cycles < target && guard++ < 4000) step(st, dt);
+  // Budget per cycle, not a flat count: in a light wind a cycle takes over
+  // twenty seconds, and a fixed cap just reports a working plan as no plan.
+  while (st.cycles < target && guard++ < 2000 * cycles) step(st, dt);
   if (st.cycles < target) return null;
   const T = st.time - t0;
   if (T <= 0) return null;
@@ -546,7 +550,7 @@ export function solvePlan(specs) {
   const axes = [
     ["outFrac", [0.12, 0.16, 0.2, 0.24, 0.28, 0.32, 0.36, 0.42, 0.5]],
     ["turn", [0.2, 0.3, 0.4, 0.5, 0.7, 1, 1.4, 2]],
-    ["turnLead", [0, 0.1, 0.2, 0.3, 0.45, 0.6, 0.9]],
+    ["turnLead", [0, 0.15, 0.3, 0.45, 0.6, 0.8, 1]],
   ];
   let best = score({ ...specs, ...plan }) ?? -Infinity;
   for (let pass = 0; pass < 2; pass++) {
