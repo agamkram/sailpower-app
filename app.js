@@ -10,12 +10,12 @@ import {
   sampleCycle,
   solvePlan,
   step,
-} from "./sim.js?v=87";
-import { draw, bindCam } from "./view.js?v=87";
+} from "./sim.js?v=88";
+import { draw, bindCam } from "./view.js?v=88";
 
-// v2: mass became chassis-only and eta became converter-only, so specs saved
-// under v1 would quietly describe a different machine.
-const KEY = "windcart-v2";
+// v3: the reference sail is 2.5×4 m on a 10 m track with a 0.5 s turn.
+// Saved v2 specs would put the old 5×2 m machine back on screen.
+const KEY = "windcart-v3";
 const RATES = [1, 4, 8];
 const FIELDS = ["wind", "plateW", "plateH", "track", "mass", "outFrac", "vReturn", "turn", "fMax", "cd", "eta", "crr"];
 
