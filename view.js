@@ -1,6 +1,6 @@
 /** Side view of the machine. Face-on sail is the thin plate. Edge-on sail faces the camera. */
 
-import { stroke } from "./sim.js?v=88";
+import { stroke } from "./sim.js?v=89";
 
 function sub(a, b) {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -56,6 +56,7 @@ let followX = null;
 // is running they share its clock, including the rate button. While it is
 // paused they keep drifting on the wall clock so the slider still shows.
 const windParts = [];
+const windDraw = [];
 let windWall = 0;
 let windSim = null;
 
@@ -80,6 +81,8 @@ function reseedWind(p, origin, sailTop, atSail) {
   p.ox = 0;
   p.oy = 0;
   p.oz = 0;
+  p.r = 0.7 + Math.random() * 1.5;
+  p.a = 0.28 + Math.random() * 0.5;
   p.x = origin - 4 - Math.random() * 9;
   if (atSail) {
     p.y = 0.7 + Math.random() * Math.max(0.5, sailTop - 0.4);
@@ -654,15 +657,15 @@ export function draw(canvas, st) {
     ctx.fill();
   }
 
-  // Behind the machine. Free stream runs down the track at the slider
-  // speed. Near the plate, sailWash adds the split around it.
+  // Particles, not dashes. They ride the free stream and sailWash
+  // pushes the ones aimed at the plate out to an edge.
   {
     const dt = windDt(st);
     const speed = Math.max(0, s.wind);
     const sailAir = py1;
-    const count = 48 + Math.round(speed * 2.2);
+    const count = 110 + Math.round(speed * 4);
     while (windParts.length < count) {
-      const p = { x: 0, y: 0, z: 0, ox: 0, oy: 0, oz: 0 };
+      const p = { x: 0, y: 0, z: 0, ox: 0, oy: 0, oz: 0, r: 1.2, a: 0.5 };
       reseedWind(p, followX, sailAir, windParts.length % 2 === 0);
       p.x = followX + (Math.random() - 0.55) * 20;
       windParts.push(p);
@@ -675,21 +678,16 @@ export function draw(canvas, st) {
       halfW: s.plateW / 2,
       U: speed - st.vx,
     };
-    ctx.save();
-    ctx.lineCap = "round";
-    ctx.strokeStyle = "rgba(186, 214, 232, 0.9)";
+    windDraw.length = 0;
     for (let i = 0; i < count; i++) {
       const p = windParts[i];
       const wash = sailWash(p, sail);
       p.ox += (wash[0] - (p.ox || 0)) * 0.55;
       p.oy += (wash[1] - (p.oy || 0)) * 0.55;
       p.oz += (wash[2] - (p.oz || 0)) * 0.55;
-      const vx = speed + p.ox;
-      const vy = p.oy;
-      const vz = p.oz;
-      p.x += vx * dt;
-      p.y += vy * dt;
-      p.z += vz * dt;
+      p.x += (speed + p.ox) * dt;
+      p.y += p.oy * dt;
+      p.z += p.oz * dt;
       // A step can jump the thin plate. Put that air out at the nearest edge.
       if (Math.abs(Math.cos(yaw)) > 0.2) {
         const c = Math.cos(yaw);
@@ -715,15 +713,19 @@ export function draw(canvas, st) {
       if (p.x > followX + 16 || p.x < followX - 18 || p.y > sailAir + 2.4 || p.y < 0.15) {
         reseedWind(p, followX, sailAir, i % 2 === 0);
       }
-      const head = project([p.x, p.y, p.z]);
-      const tail = project([p.x - vx * 0.16, p.y - vy * 0.16, p.z - vz * 0.16]);
-      if (!head || !tail || head.z < 0.4) continue;
-      ctx.globalAlpha = Math.min(0.55, 0.14 + speed / 70) * Math.min(1, 14 / head.z);
-      ctx.lineWidth = Math.max(1, 8 / head.z);
+      const q = project([p.x, p.y, p.z]);
+      if (!q || q.z < 0.4) continue;
+      windDraw.push({ p, q, z: q.z });
+    }
+    ctx.save();
+    ctx.fillStyle = "rgb(214, 230, 240)";
+    for (const dot of windDraw) {
+      if (dot.z < depthOf([bx, midY, 0]) - 0.05) continue;
+      const rad = Math.max(0.7, dot.p.r * (10 / dot.z));
+      ctx.globalAlpha = dot.p.a * Math.min(1, 13 / dot.z);
       ctx.beginPath();
-      ctx.moveTo(tail.x, tail.y);
-      ctx.lineTo(head.x, head.y);
-      ctx.stroke();
+      ctx.arc(dot.q.x, dot.q.y, rad, 0, Math.PI * 2);
+      ctx.fill();
     }
     ctx.restore();
   }
@@ -742,31 +744,23 @@ export function draw(canvas, st) {
     ctx.fill();
   }
 
-  // Air that has spilled past the plate and is closer than it. Drawn after
-  // the sail so the split is not hidden behind the face.
+  // Motes that have spilled past the plate and sit closer than it.
   ctx.save();
-  ctx.lineCap = "round";
-  ctx.strokeStyle = "rgba(186, 214, 232, 0.95)";
+  ctx.fillStyle = "rgb(214, 230, 240)";
   const sailDepth = depthOf([bx, midY, 0]);
   const wc = Math.cos(yaw);
   const ws = Math.sin(yaw);
-  for (const p of windParts) {
-    if (depthOf([p.x, p.y, p.z]) > sailDepth - 0.05) continue;
+  for (const dot of windDraw) {
+    if (dot.z > sailDepth - 0.05) continue;
+    const p = dot.p;
     const ly = p.y - midY;
     const lz = -(p.x - bx) * ws + p.z * wc;
     if (Math.abs(ly) < s.plateH / 2 && Math.abs(lz) < s.plateW / 2) continue;
-    const vx = s.wind + (p.ox || 0);
-    const vy = p.oy || 0;
-    const vz = p.oz || 0;
-    const head = project([p.x, p.y, p.z]);
-    const tail = project([p.x - vx * 0.16, p.y - vy * 0.16, p.z - vz * 0.16]);
-    if (!head || !tail || head.z < 0.4) continue;
-    ctx.globalAlpha = Math.min(0.6, 0.18 + s.wind / 60) * Math.min(1, 12 / head.z);
-    ctx.lineWidth = Math.max(1, 8 / head.z);
+    const rad = Math.max(0.7, p.r * (10 / dot.z));
+    ctx.globalAlpha = Math.min(0.85, p.a + 0.15) * Math.min(1, 12 / dot.z);
     ctx.beginPath();
-    ctx.moveTo(tail.x, tail.y);
-    ctx.lineTo(head.x, head.y);
-    ctx.stroke();
+    ctx.arc(dot.q.x, dot.q.y, rad, 0, Math.PI * 2);
+    ctx.fill();
   }
   ctx.restore();
 
