@@ -1,6 +1,6 @@
 /** Side view of the machine. Face-on sail is the thin plate. Edge-on sail faces the camera. */
 
-import { stroke } from "./sim.js?v=92";
+import { stroke } from "./sim.js?v=93";
 
 function sub(a, b) {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -776,7 +776,7 @@ function paintGrain(ctx, dot) {
   const x2 = a.x + (dx / len) * reach;
   const y2 = a.y + (dy / len) * reach;
   ctx.globalAlpha = dot.p.a * Math.min(1, 14 / dot.z);
-  ctx.lineWidth = 1.15;
+  ctx.lineWidth = 0.55;
   ctx.beginPath();
   ctx.moveTo(a.x, a.y);
   ctx.lineTo(x2, y2);
