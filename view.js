@@ -74,13 +74,13 @@ export function draw(canvas, st) {
   const s = st.specs;
   followX = st.x;
 
-  const zCam = 6.36;
-  const eye = [followX - 1.35, 2.82, zCam];
-  const target = [followX + 0.35, 0.63, 0];
+  const zCam = 7.78;
+  const eye = [followX - 1.35, 3.36, zCam];
+  const target = [followX + 0.35, 0.81, 0];
   const zaxis = norm(sub(eye, target));
   const xaxis = norm(cross([0, 1, 0], zaxis));
   const yaxis = cross(zaxis, xaxis);
-  const fov = 0.88;
+  const fov = 0.98;
   const fLen = h / 2 / Math.tan(fov / 2);
   const cam = { eye, xaxis, yaxis, zaxis, fLen, w, h };
   const NEAR = 0.16;
