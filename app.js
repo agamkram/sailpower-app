@@ -294,11 +294,11 @@ $("rate").addEventListener("click", () => {
 for (const id of FIELDS) {
   $(id).addEventListener("input", () => {
     paintForm();
-    if (!running) {
-      specs = readForm();
-      state = createState(specs);
-      paint();
-    }
+    specs = readForm();
+    const next = createState(specs);
+    if (running) state.specs = next.specs;
+    else state = next;
+    paint();
   });
 }
 

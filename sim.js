@@ -28,8 +28,8 @@ export function endPad(s) {
 }
 
 export function fitError(s) {
-  if (endPad(s) * 2 + 2 > s.track) return "Plate is too wide for this track.";
-  if (s.plateW < 0.2 || s.plateH < 0.2) return "Plate is too small.";
+  if (endPad(s) * 2 + 2 > s.track) return "Sail is too wide for this track.";
+  if (s.plateW < 0.2 || s.plateH < 0.2) return "Sail is too small.";
   return "";
 }
 
