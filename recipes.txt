@@ -1,28 +1,56 @@
-WindCart timing recipes
-Remeasured together in sim.js. Wind 10 m/s, sail 5×2 m, 40 kg, rail 1000 N, track 20 m.
-Three steady cycles after the first. Average is net energy divided by cycle time, including time sitting still.
-Recipes 1–4 and 6 use a 1 s slew. Recipe 5 uses 0.5 s.
+WindCart rotation plan
+Wind 10 m/s, sail 5x2 m, 40 kg, rail 1000 N, track 20 m. Three steady cycles
+after the first. Average is net energy over cycle time, including time at rest.
 
-1. Stop, then turn
-   Face-on until the brake. Stop. Slew. Edge-on home. Stop. Slew back. Coils clipped.
-   4.72 kJ/cycle · 422 W · 11.2 s · parked 1.92 s · made 6.67 · motor 1.90 · hold 0.05
+The six named recipes are gone. They were not six rotation rules: they mixed
+three knobs at once, and the one that won on paper, "slower outbound" at 497 W,
+was another recipe at a different cruise speed with identical turn timing.
 
-2. Turn while slowing
-   Slew starts about a second early, both ends. Stiff coil command, then clipped.
-   3.54 kJ/cycle · 381 W · 9.3 s · parked 0.06 s · made 6.21 · motor 2.66 · hold 0.01
+A rotation plan is now two numbers, and cruise speed is a spec slider, not part
+of the plan.
 
-3. Turn while slowing, coil limit
-   Same early slew. Command never asks for more acceleration than the coils can make.
-   4.06 kJ/cycle · 403 W · 10.1 s · parked 0.46 s · made 5.96 · motor 1.88 · hold 0.02
+  turn      how long the 90 degree slew takes, seconds
+  turnLead  how many seconds before the cart reaches rest the slew begins
+            0            turn only after the cart has stopped
+            = turn       the slew finishes exactly as the cart stops
+            > turn       the slew finishes while the cart is still moving
 
-4. Brake, then finish the turn
-   Face-on until the real brake. Turn during the brake, finish at the cap. Coils limited.
-   4.50 kJ/cycle · 461 W · 9.8 s · parked 1.17 s · made 6.43 · motor 1.90 · hold 0.03
+Braking now starts where the stopping distance says it must. No plan is handed
+extra room to turn in, which is what three of the old recipes were quietly given.
 
-5. Turn on the way in
-   Half-second slew, started so it finishes as the cart stops. Coils limited.
-   3.85 kJ/cycle · 442 W · 8.7 s · parked 0.08 s · made 5.95 · motor 2.10 · hold 0.00
+Presets vary turnLead alone, so the selector compares turn timing and nothing
+else. At turn 1 s, outFrac 1/3:
 
-6. Slower outbound
-   Recipe 4 timing. Outbound 2.8 m/s instead of one-third of the wind. Coils limited.
-   5.35 kJ/cycle · 497 W · 10.8 s · parked 1.16 s · made 7.29 · motor 1.90 · hold 0.03
+  Turn once stopped       lead 0.00    443 W
+  Finish as it stops      lead 0.25    460 W   <- default
+  Turn while slowing      lead 0.50    453 W
+  Turn before the brake   lead 1.00   -120 W
+
+Going edge-on before the brake throws away the end of the power stroke, and
+coming face-on early means motoring home into a loaded sail. The cliff is real.
+
+Two things to settle before these numbers can be trusted
+--------------------------------------------------------
+1. The slew is free. There is no cost to turning the sail anywhere in the
+   energy accounting, so the sim always prefers the fastest possible turn.
+   At 0.15 s the optimiser is asking a 5 m sail for 9300 Nm, 21 rad/s, and a
+   52 m/s tip speed. Charging the inertia alone, with a 16 kg sail, moves the
+   best turn from 0.15 s to about 1 s:
+
+     turn s   sim avgW   slew W   corrected
+       0.15       513     1654       -1141
+       0.25       513      595         -82
+       0.50       490      149         341
+       0.75       465       66         399
+       1.00       443       37         406
+       1.50       403       17         386
+
+   Aero torque on the loaded plate is on top of that and is not counted either.
+
+2. Cruise speed is worth more than rotation. Holding the plan fixed and
+   sweeping outbound speed spans 378 to 511 W, and the best is about 2.2 m/s,
+   not the one third of wind speed the defaults use. Classic drag-device theory
+   puts the peak at U/3 for the power stroke alone, but the return trip and the
+   time at rest are fixed overhead, so a slower outbound spreads that overhead
+   across more generating time. The optimum moves with the other specs, so it
+   wants solving, not hardcoding.

@@ -11,7 +11,9 @@ export function defaultSpecs() {
     cd: 1.28,
     rho: 1.225,
     thickness: 0.006,
-    turn: 0.5,
+    turn: 1,
+    turnLead: 0.25,
+    coilMode: "limited",
     fMax: 1000,
     etaG: 0.85,
     etaM: 0.85,
@@ -22,6 +24,19 @@ export function defaultSpecs() {
     eta: 0.85,
   };
 }
+
+/**
+ * A rotation plan is two numbers. `turn` is how long the 90° slew takes.
+ * `turnLead` is how many seconds before the cart comes to rest the slew starts.
+ * lead 0 turns only once stopped; lead === turn finishes exactly at rest;
+ * lead > turn finishes while the cart is still moving.
+ */
+export const PRESETS = [
+  { id: "stopped", name: "Turn once stopped", turnLead: 0 },
+  { id: "arrive", name: "Finish as it stops", turnLead: 0.25 },
+  { id: "slowing", name: "Turn while slowing", turnLead: 0.5 },
+  { id: "early", name: "Turn before the brake", turnLead: 1 },
+];
 
 export function stroke(s) {
   const reach = 0.34;
@@ -123,52 +138,41 @@ function canHold(s, fa, fr) {
   return Math.abs(fa + fr) <= s.fMax;
 }
 
+/**
+ * Seconds until the cart is at rest at the far cap: cruise the distance that is
+ * left beyond the braking zone, then decelerate. Continuous across brake entry,
+ * so a slew lead longer than the brake can reach back into the cruise.
+ */
+function timeToRest(remaining, speed, brake) {
+  if (speed <= 0.05) return 0;
+  const r = Math.max(0, remaining);
+  return (r + Math.min(r, brake)) / speed;
+}
+
 function sub(st, dt) {
   const s = st.specs;
   const { lo, hi } = limits(s);
   const fa = aeroForce(s, st.vx, st.alpha);
   const fr = rollForce(s, st.vx);
   let phase = st.phase;
-  const recipe = s.recipe || "wayin";
-  const turnSec = recipe === "wayin" ? s.turn : 1;
-  const vOut = s.wind * (recipe === "slowout" ? 0.28 : s.outFrac);
-  const turnRate = (Math.PI / 2) / Math.max(0.15, turnSec);
-  const stiff = recipe === "park" || recipe === "early";
+  const turnSec = Math.max(0.15, s.turn);
+  const lead = Math.max(0, s.turnLead ?? 0);
+  const vOut = s.wind * s.outFrac;
+  const turnRate = (Math.PI / 2) / turnSec;
+  const stiff = s.coilMode === "stiff";
   const brake = brakeDist(s, st.vx, fa);
-  let needOut = brake;
-  let needBack = brake;
-  if (recipe === "early" || recipe === "earlyCoil") {
-    needOut = Math.max(brake, Math.abs(st.vx) * turnSec + 0.35);
-    needBack = brake + Math.max(1.1, turnSec * 1.8);
-  } else if (recipe === "wayin") {
-    const slewDist = Math.max(brake, Math.abs(st.vx) * turnSec * 0.5);
-    needOut = slewDist;
-    needBack = slewDist;
-  }
 
-  if (phase === "out" && st.vx >= 0 && hi - st.x <= needOut) {
-    phase = "brakeOut";
-    st.feather0 = Math.max(0.3, hi - st.x);
-  } else if (phase === "back" && st.vx <= 0 && st.x - lo <= needBack) {
-    phase = "brakeBack";
-    st.openAt = Math.max(0.3, st.x - lo);
-  }
+  // Braking starts where the physics says it must: no recipe gets extra room.
+  if (phase === "out" && st.vx >= 0 && hi - st.x <= brake) phase = "brakeOut";
+  else if (phase === "back" && st.vx <= 0 && st.x - lo <= brake) phase = "brakeBack";
 
-  if (recipe !== "park" && phase === "brakeOut") {
-    const span = Math.max(0.3, st.feather0 || hi - st.x);
-    const remain = Math.max(0, hi - st.x);
-    const want = (1 - remain / span) * (Math.PI / 2);
-    if (st.alpha < want) st.alpha = Math.min(want, st.alpha + turnRate * dt);
-  } else if (recipe !== "park" && phase === "brakeBack") {
-    const span = Math.max(0.3, st.openAt || st.x - lo);
-    const remain = Math.max(0, st.x - lo);
-    const openStart =
-      recipe === "early" || recipe === "earlyCoil"
-        ? Math.min(span, Math.max(0.8, turnSec * 1.4))
-        : span;
-    if (remain < openStart) {
-      const want = (remain / openStart) * (Math.PI / 2);
-      if (st.alpha > want) st.alpha = Math.max(want, st.alpha - turnRate * dt);
+  if (phase === "out" || phase === "brakeOut") {
+    if (timeToRest(hi - st.x, st.vx, brake) <= lead) {
+      st.alpha = Math.min(Math.PI / 2, st.alpha + turnRate * dt);
+    }
+  } else if (phase === "back" || phase === "brakeBack") {
+    if (timeToRest(st.x - lo, -st.vx, brake) <= lead) {
+      st.alpha = Math.max(0, st.alpha - turnRate * dt);
     }
   } else if (phase === "turnEdge") {
     st.alpha = Math.min(Math.PI / 2, st.alpha + turnRate * dt);
@@ -214,17 +218,11 @@ function sub(st, dt) {
   if (st.x >= hi) {
     st.x = hi;
     if (st.vx > 0) st.vx = 0;
-    if (phase === "out") {
-      phase = "brakeOut";
-      st.feather0 = 0.3;
-    }
+    if (phase === "out") phase = "brakeOut";
   } else if (st.x <= lo) {
     st.x = lo;
     if (st.vx < 0) st.vx = 0;
-    if (phase === "back") {
-      phase = "brakeBack";
-      st.openAt = 0.3;
-    }
+    if (phase === "back") phase = "brakeBack";
   }
   st.slip = false;
   if (coilLimited) {
