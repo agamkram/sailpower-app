@@ -13,7 +13,7 @@ export function defaultSpecs() {
     rho: 1.225,
     thickness: 0.006,
     turn: 0.5,
-    turnLead: 0.3,
+    turnLead: 0.6,
     coilMode: "limited",
     fMax: 1000,
     etaG: 0.95,

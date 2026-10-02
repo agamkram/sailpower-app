@@ -5,13 +5,12 @@ import {
   netOf,
   phaseLabel,
   planInfo,
-  PRESETS,
   rig,
   sampleCycle,
   solvePlan,
   step,
-} from "./sim.js?v=98";
-import { draw, bindCam } from "./view.js?v=98";
+} from "./sim.js?v=99";
+import { draw, bindCam } from "./view.js?v=99";
 
 // v3: the reference sail is 2.5×4 m on a 10 m track with a 0.5 s turn.
 // Saved v2 specs would put the old 5×2 m machine back on screen.
@@ -36,7 +35,7 @@ function loadSpecs() {
   const base = defaultSpecs();
   try {
     const saved = JSON.parse(localStorage.getItem(KEY + "-specs") || "null");
-    if (saved && typeof saved === "object") return { ...base, ...saved };
+    if (saved && typeof saved === "object") return { ...base, ...saved, turnLead: 0.6 };
   } catch (e) {}
   return base;
 }
@@ -112,42 +111,10 @@ function paintForm() {
 }
 
 function paintPlan(s) {
-  const lead = s.turnLead ?? 0;
-  for (const btn of $("plan-chips").children) {
-    const on = Math.abs(Number(btn.dataset.lead) - lead) < 0.01;
-    btn.classList.toggle("on", on);
-    btn.setAttribute("aria-checked", on ? "true" : "false");
-  }
   const p = planInfo(s);
   $("plan-note").textContent =
     `turn ${p.turn.toFixed(2)}s · lead ${p.lead.toFixed(2)}s · ` +
     `brake ${p.brakeM.toFixed(1)}m · ${Math.round(p.torqueNm)} Nm`;
-}
-
-function buildPlan() {
-  const host = $("plan-chips");
-  host.replaceChildren();
-  for (const p of PRESETS) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "chip";
-    btn.textContent = p.name;
-    btn.dataset.lead = String(p.turnLead);
-    btn.setAttribute("role", "radio");
-    btn.addEventListener("click", () => {
-      specs = { ...specs, turnLead: p.turnLead };
-      dropCycle();
-      // A running sim reads its own copy of the specs, so the choice has to be
-      // handed to it the same way a slider does or the chip lights up and
-      // nothing on the rail changes.
-      if (running) state.specs = specs;
-      else state = createState(specs);
-      paintPlan(specs);
-      if (scrub != null) applyScrub(scrub);
-      else paint();
-    });
-    host.appendChild(btn);
-  }
 }
 
 function ensureCycle() {
@@ -368,7 +335,7 @@ $("solve").addEventListener("click", async () => {
   try {
     const base = readForm();
     const plan = solvePlan(base);
-    specs = { ...base, outFrac: plan.outFrac, turn: plan.turn, turnLead: plan.turnLead };
+    specs = { ...base, outFrac: plan.outFrac, turn: plan.turn, turnLead: 0.6 };
     dropCycle();
     clearScrub();
     state = createState(specs);
@@ -398,7 +365,6 @@ for (const id of FIELDS) {
   });
 }
 
-buildPlan();
 fillForm();
 pin();
 bindCam($("view"), () => {
