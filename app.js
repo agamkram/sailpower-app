@@ -7,6 +7,7 @@ import {
   planInfo,
   PRESETS,
   rig,
+  sampleCycle,
   solvePlan,
   step,
 } from "./sim.js";
@@ -24,6 +25,10 @@ let running = false;
 let rate = 1;
 let last = 0;
 let powerScale = 1500;
+// One settled cycle, cached, so the scrubber has something to slide along.
+let cycle = null;
+let cycleKey = "";
+let scrub = null;
 
 const $ = (id) => document.getElementById(id);
 
@@ -131,12 +136,45 @@ function buildPlan() {
     btn.setAttribute("role", "radio");
     btn.addEventListener("click", () => {
       specs = { ...specs, turnLead: p.turnLead };
+      dropCycle();
       if (!running) state = createState(specs);
       paintPlan(specs);
-      paint();
+      if (scrub != null) applyScrub(scrub);
+      else paint();
     });
     host.appendChild(btn);
   }
+}
+
+function ensureCycle() {
+  const key = JSON.stringify(specs);
+  if (cycle !== null && cycleKey === key) return cycle;
+  cycleKey = key;
+  cycle = sampleCycle(specs);
+  return cycle;
+}
+
+function dropCycle() {
+  cycle = null;
+  cycleKey = "";
+}
+
+/** Put the machine where it would be at this fraction of one cycle. */
+function applyScrub(frac) {
+  scrub = Math.max(0, Math.min(1, frac));
+  const c = ensureCycle();
+  if (!c) {
+    paint();
+    return;
+  }
+  const i = Math.round(scrub * (c.frames.length - 1));
+  Object.assign(state, c.frames[i]);
+  paint();
+}
+
+function clearScrub() {
+  scrub = null;
+  $("track-map").classList.remove("is-scrubbing");
 }
 
 function fmtW(w) {
@@ -152,21 +190,28 @@ function fmtKJ(j) {
 
 function paint() {
   const err = fitError(state.specs);
-  let label = running ? phaseLabel(state.phase) : err || "Ready";
-  if (running && state.feather > 0.02) {
+  const live = running || scrub != null;
+  let label = live ? phaseLabel(state.phase) : err || "Ready";
+  if (live && state.feather > 0.02) {
     label += " · feathered " + Math.round((state.feather * 180) / Math.PI) + "°";
   }
-  if (running && state.slip) label += " · slipping";
+  if (live && state.slip) label += " · slipping";
   $("phase").textContent = label;
   $("speed").textContent = state.vx.toFixed(1) + " m/s";
   $("watts").textContent = fmtW(state.inst);
   $("watts").style.color = state.inst >= 0 ? "var(--green)" : "var(--amber)";
   const net = netOf(state);
-  $("net").textContent = "net " + fmtKJ(net);
-  const avg = state.time > 0.5 ? net / state.time : 0;
-  $("substat").textContent =
-    state.cycles + (state.cycles === 1 ? " cycle" : " cycles") +
-    (state.time > 0.5 ? " · " + Math.round(avg) + " W avg" : "");
+  const dur = cycle ? cycle.seconds : state.lastCycleS;
+  if (scrub != null) {
+    $("net").textContent = (scrub * dur).toFixed(2) + " s";
+    $("substat").textContent = dur > 0 ? "of a " + dur.toFixed(1) + " s cycle" : "no cycle";
+  } else {
+    $("net").textContent = "net " + fmtKJ(net);
+    const avg = state.time > 0.5 ? net / state.time : 0;
+    $("substat").textContent =
+      state.cycles + (state.cycles === 1 ? " cycle" : " cycles") +
+      (state.time > 0.5 ? " · " + Math.round(avg) + " W avg" : "");
+  }
   powerScale = Math.max(800, powerScale * 0.998, Math.abs(state.inst) * 1.25);
   const span = powerScale;
   const pct = Math.max(-50, Math.min(50, (state.inst / span) * 50));
@@ -180,8 +225,13 @@ function paint() {
     fill.style.width = -pct + "%";
     fill.style.background = "var(--amber)";
   }
-  const along = state.specs.track > 0 ? (state.x / state.specs.track) * 100 : 0;
-  $("map-dot").style.left = Math.max(0, Math.min(100, along)) + "%";
+  let frac;
+  if (scrub != null) frac = scrub;
+  else if (dur > 0) frac = Math.min(1, state.cycleT / dur);
+  else frac = 0;
+  const pctAlong = Math.max(0, Math.min(100, frac * 100));
+  $("map-dot").style.left = pctAlong + "%";
+  $("track-map").setAttribute("aria-valuenow", Math.round(pctAlong));
   draw($("view"), state);
 }
 
@@ -207,6 +257,7 @@ function setRunning(on) {
     specs = readForm();
     localStorage.setItem(KEY + "-specs", JSON.stringify(specs));
     state = createState(specs);
+    clearScrub();
     running = true;
     last = 0;
     powerScale = 1500;
@@ -222,6 +273,62 @@ function setRunning(on) {
 function closeSheet() {
   $("sheet").hidden = true;
 }
+
+const map = $("track-map");
+
+function mapFrac(e) {
+  const r = map.getBoundingClientRect();
+  return (e.clientX - r.left) / Math.max(1, r.width);
+}
+
+// Track the drag with our own flag. Gating moves on hasPointerCapture meant a
+// capture that failed to take left the handle dead for the rest of the drag.
+let dragId = null;
+
+map.addEventListener(
+  "pointerdown",
+  (e) => {
+    dragId = e.pointerId;
+    try {
+      map.setPointerCapture(e.pointerId);
+    } catch (err) {
+      /* capture is a nicety, the drag works without it */
+    }
+    map.classList.add("is-scrubbing");
+    if (running) setRunning(false);
+    applyScrub(mapFrac(e));
+    e.preventDefault();
+  },
+  { passive: false }
+);
+map.addEventListener(
+  "pointermove",
+  (e) => {
+    if (dragId !== e.pointerId) return;
+    applyScrub(mapFrac(e));
+    e.preventDefault();
+  },
+  { passive: false }
+);
+for (const kind of ["pointerup", "pointercancel", "lostpointercapture"]) {
+  map.addEventListener(kind, (e) => {
+    if (dragId !== e.pointerId) return;
+    dragId = null;
+    try {
+      map.releasePointerCapture(e.pointerId);
+    } catch (err) {
+      /* already gone */
+    }
+    map.classList.remove("is-scrubbing");
+  });
+}
+map.addEventListener("keydown", (e) => {
+  const stepBy = e.key === "ArrowLeft" ? -0.02 : e.key === "ArrowRight" ? 0.02 : 0;
+  if (!stepBy) return;
+  if (running) setRunning(false);
+  applyScrub((scrub ?? 0) + stepBy);
+  e.preventDefault();
+});
 
 $("run").addEventListener("click", () => setRunning(!running));
 $("specs-btn").addEventListener("click", () => {
@@ -242,6 +349,8 @@ document.addEventListener(
 $("defaults").addEventListener("click", () => {
   if (running) return;
   specs = defaultSpecs();
+  dropCycle();
+  clearScrub();
   state = createState(specs);
   fillForm();
   paint();
@@ -256,6 +365,8 @@ $("solve").addEventListener("click", async () => {
     const base = readForm();
     const plan = solvePlan(base);
     specs = { ...base, outFrac: plan.outFrac, turn: plan.turn, turnLead: plan.turnLead };
+    dropCycle();
+    clearScrub();
     state = createState(specs);
     fillForm();
     paint();
@@ -274,10 +385,12 @@ for (const id of FIELDS) {
   $(id).addEventListener("input", () => {
     paintForm();
     specs = readForm();
+    dropCycle();
     const next = createState(specs);
     if (running) state.specs = next.specs;
     else state = next;
-    paint();
+    if (!running && scrub != null) applyScrub(scrub);
+    else paint();
   });
 }
 

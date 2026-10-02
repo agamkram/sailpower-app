@@ -96,7 +96,7 @@ header h1 {
 .cam-hint {
   position: absolute;
   left: 10px;
-  bottom: 22px;
+  bottom: 34px;
   z-index: 2;
   margin: 0;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
@@ -140,22 +140,47 @@ header h1 {
   position: absolute;
   left: 10px;
   right: 10px;
-  bottom: 8px;
+  bottom: 2px;
+  height: 26px;
+  z-index: 3;
+  cursor: grab;
+  touch-action: none;
+}
+
+/* The rail is thin but the grab area is a thumb wide. */
+.track-map::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
   height: 8px;
+  margin-top: -4px;
   border-radius: 99px;
   background: rgba(255, 255, 255, 0.12);
-  pointer-events: none;
+}
+
+.track-map:active { cursor: grabbing; }
+
+.track-map:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 99px;
 }
 
 .track-map i {
   position: absolute;
-  top: -3px;
-  width: 14px;
-  height: 14px;
-  margin-left: -7px;
+  top: 50%;
+  width: 18px;
+  height: 18px;
+  margin: -9px 0 0 -9px;
   border-radius: 50%;
   background: var(--amber);
   box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35);
+}
+
+.track-map.is-scrubbing i {
+  transform: scale(1.18);
 }
 
 .meters {

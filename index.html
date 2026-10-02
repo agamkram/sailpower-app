@@ -86,7 +86,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=IBM+Plex+Mono:wght@500;600&family=Michroma&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=68" />
+  <link rel="stylesheet" href="styles.css?v=72" />
 </head>
 <body>
   <div class="fit-stage" id="fit-stage">
@@ -98,7 +98,10 @@
       <div class="stage-wrap">
         <canvas id="view" aria-label="Wind cart on the rail. Drag to orbit, pinch or scroll to zoom, double-tap to reset."></canvas>
         <p class="cam-hint" id="cam-hint">drag · pinch · double-tap reset</p>
-        <div class="track-map" aria-hidden="true"><i id="map-dot"></i></div>
+        <div class="track-map" id="track-map" role="slider" tabindex="0"
+             aria-label="Scrub through one cycle" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <i id="map-dot"></i>
+        </div>
       </div>
 
       <section class="meters" aria-live="polite">
@@ -180,6 +183,6 @@
       </form>
     </div>
   </div>
-  <script type="module" src="app.js?v=68"></script>
+  <script type="module" src="app.js?v=72"></script>
 </body>
 </html>

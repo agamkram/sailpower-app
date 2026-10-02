@@ -156,6 +156,8 @@ export function createState(specs) {
     feather: 0,
     saturated: false,
     satTime: 0,
+    cycleT: 0,
+    lastCycleS: 0,
     lastCycleNet: 0,
     cycleGen: 0,
     cycleMot: 0,
@@ -269,9 +271,13 @@ function sub(st, dt) {
 
   // Shed load rather than stall. The sail can never come further into the wind
   // than the rail can hold against, so in a gale it simply runs part-feathered.
+  // Only call it feathered when the floor is actually holding the sail off the
+  // wind. On the fast return the apparent wind makes the floor non-zero even
+  // though the sail is already edge-on and nothing is being given up.
   const floor = featherFloor(s, st.vx);
-  st.feather = floor;
-  if (st.alpha < floor) st.alpha = Math.min(Math.PI / 2, floor);
+  const bound = st.alpha < floor;
+  st.feather = bound ? floor : 0;
+  if (bound) st.alpha = Math.min(Math.PI / 2, floor);
 
   // Work the slew drive does: spin the sail up to rate, then recover on the
   // way down, plus the aero torque it turns against while the plate is loaded.
@@ -382,6 +388,8 @@ function sub(st, dt) {
       st.alpha = st.feather;
       phase = "out";
       st.cycles += 1;
+      st.lastCycleS = st.cycleT;
+      st.cycleT = 0;
       st.lastCycleNet =
         st.cycleGen - st.cycleMot - st.cycleSlew - st.cycleLoss - st.cycleStop;
       st.cycleGen = 0;
@@ -420,6 +428,7 @@ function sub(st, dt) {
   st.faero = faNow;
   st.inst = inst;
   st.time += dt;
+  st.cycleT += dt;
 }
 
 export function step(st, dt) {
@@ -443,6 +452,34 @@ export function planInfo(s) {
     brakeM: brakeDist(s, vOut, fa, movingMass(s, 0)),
     torqueNm: slewTorque(s),
   };
+}
+
+/**
+ * One settled cycle, frame by frame, so it can be scrubbed by hand. Frames are
+ * evenly spaced in time, which is what makes the slider linear to drag.
+ */
+export function sampleCycle(specs, maxFrames = 1600) {
+  const dt = 0.02;
+  const st = createState(specs);
+  let g = 0;
+  while (st.cycles < 1 && g++ < 2000) step(st, dt);
+  if (st.cycles < 1) return null;
+  const mark = st.cycles;
+  const frames = [];
+  while (st.cycles === mark && frames.length < maxFrames) {
+    frames.push({
+      x: st.x,
+      vx: st.vx,
+      alpha: st.alpha,
+      phase: st.phase,
+      inst: st.inst,
+      feather: st.feather,
+      slip: st.slip,
+    });
+    step(st, dt);
+  }
+  if (frames.length < 2) return null;
+  return { frames, seconds: frames.length * dt };
 }
 
 /** Average net watts over steady cycles. Returns null if it never settles. */
