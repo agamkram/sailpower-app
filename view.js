@@ -1,6 +1,6 @@
 /** Side view of the machine. Face-on sail is the thin plate. Edge-on sail faces the camera. */
 
-import { stroke } from "./sim.js?v=96";
+import { stroke } from "./sim.js?v=97";
 
 function sub(a, b) {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -656,8 +656,7 @@ export function draw(canvas, st) {
     ctx.fill();
   }
 
-  // Filled circles, one pixel across. A thicker stroke was growing the
-  // mark along the wind because the round ends stick out past the line.
+  // One-pixel squares. A circle is a heavier mark and reads as a ball.
   {
     const dt = windDt(st);
     const speed = Math.max(0, s.wind);
@@ -758,12 +757,10 @@ export function draw(canvas, st) {
   windArrow(ctx, cam);
 }
 
-/** A round grain. A stroke with round ends grows longer when the pen gets thicker. */
+/** One filled pixel. A circle has to be approximated; a square is one rectangle. */
 function paintGrain(ctx, dot) {
   ctx.globalAlpha = dot.p.a * Math.min(1, 14 / dot.z);
-  ctx.beginPath();
-  ctx.arc(dot.q.x, dot.q.y, 0.5, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.fillRect(dot.q.x - 0.5, dot.q.y - 0.5, 1, 1);
 }
 
 /**
