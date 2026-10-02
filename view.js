@@ -1,6 +1,6 @@
 /** Side view of the machine. Face-on sail is the thin plate. Edge-on sail faces the camera. */
 
-import { stroke } from "./sim.js?v=80";
+import { stroke } from "./sim.js?v=81";
 
 function sub(a, b) {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -359,17 +359,25 @@ export function draw(canvas, st) {
     }
   }
 
-  for (const z of [-gauge / 2, gauge / 2]) {
-    const seg = 0.48;
-    for (let x = x0; x < x1; x += seg) {
-      const a0 = Math.max(cap0, x);
-      const a1 = Math.min(cap1, x + seg + 0.06);
-      if (a1 - a0 < 0.05) continue;
-      wheel([(a0 + a1) / 2, railY, z], "x", railR, a1 - a0, RAIL, 0, false, true, 2);
+  // Segments are cut on a fixed world pitch and butted, not overlapped.
+  // Overlapping skins tied to the camera window z-fought, and the joint
+  // walked the length of the rail as a line through the stator.
+  const rail0 = Math.max(cap0, x0);
+  const rail1 = Math.min(cap1, x1);
+  function tube(y, z, r, color, from, to) {
+    const seg = 0.5;
+    if (to - from < 0.04) return;
+    for (let x = Math.floor(from / seg) * seg; x < to; x += seg) {
+      const a0 = Math.max(from, x);
+      const a1 = Math.min(to, x + seg);
+      if (a1 - a0 < 0.04) continue;
+      wheel([(a0 + a1) / 2, y, z], "x", r, a1 - a0, color, 0, false, true, 2);
     }
   }
+  for (const z of [-gauge / 2, gauge / 2]) tube(railY, z, railR, RAIL, rail0, rail1);
 
-  for (let x = Math.floor(x0 * 2) / 2; x < x1; x += 0.4) {
+  const rungPitch = 0.4;
+  for (let x = Math.ceil(rail0 / rungPitch) * rungPitch; x < rail1; x += rungPitch) {
     if (x < cap0 + 0.05 || x > cap1 - 0.05) continue;
     if (Math.abs(x - bx) < 0.36) continue;
     wheel([x, railY - 0.012, 0], "z", 0.02, gauge - railR * 2 - 0.02, RUNG, 0, false, true, 2);
@@ -378,17 +386,7 @@ export function draw(canvas, st) {
   if (x0 < cap0 + 0.45) box(cap0, railY + 0.1, 0, 0.07, 0.32, gauge + 0.16, 0, STOP);
   if (x1 > cap1 - 0.45) box(cap1, railY + 0.1, 0, 0.07, 0.32, gauge + 0.16, 0, STOP);
 
-  const span0 = Math.max(cap0, x0);
-  const span1 = Math.min(cap1, x1);
-  if (span1 > span0) {
-    const seg = 0.48;
-    for (let x = span0; x < span1; x += seg) {
-      const a0 = x;
-      const a1 = Math.min(span1, x + seg + 0.06);
-      if (a1 - a0 < 0.05) continue;
-      wheel([(a0 + a1) / 2, railY, 0], "x", 0.026, a1 - a0, 0xc5d2df, 0, false, true, 2);
-    }
-  }
+  tube(railY, 0, 0.026, 0xc5d2df, rail0, rail1);
 
   const topR = 0.058;
   const sideR = 0.032;
@@ -429,8 +427,22 @@ export function draw(canvas, st) {
   const generating = st.inst > 30;
   const motoring = st.inst < -30;
   const mag = generating ? SKATE_ON : motoring ? SKATE_MOT : 0x9aa6b4;
+  // Proud of the center bar, and a nearer layer, so they cover it instead
+  // of sharing its surface. Sharing it was the blink. Two of the five are
+  // the bright pair; the other three stay the darker shade of the same
+  // state, gold while generating and blue while motoring.
   for (let i = -2; i <= 2; i++) {
-    box(bx + i * 0.07, railY - 0.012, 0, 0.05, 0.022, 0.06, 0, i % 2 ? mag : shade(mag, 0.55));
+    box(
+      bx + i * 0.07,
+      railY,
+      0,
+      0.05,
+      0.064,
+      0.078,
+      0,
+      i % 2 ? mag : shade(mag, 0.55),
+      1
+    );
   }
 
   const yaw = st.alpha;
