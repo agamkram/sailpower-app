@@ -10,8 +10,8 @@ import {
   sampleCycle,
   solvePlan,
   step,
-} from "./sim.js?v=84";
-import { draw, bindCam } from "./view.js?v=84";
+} from "./sim.js?v=85";
+import { draw, bindCam } from "./view.js?v=85";
 
 // v2: mass became chassis-only and eta became converter-only, so specs saved
 // under v1 would quietly describe a different machine.

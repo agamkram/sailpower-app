@@ -1,6 +1,6 @@
 /** Side view of the machine. Face-on sail is the thin plate. Edge-on sail faces the camera. */
 
-import { stroke } from "./sim.js?v=84";
+import { stroke } from "./sim.js?v=85";
 
 function sub(a, b) {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -40,7 +40,6 @@ const FRAME_DK = 0x66717f;
 const WHEEL = 0xd7dee8;
 const HUB = 0x1b212b;
 const PLATE = 0x8d959e;
-const PLATE_EDGE = 0x5a636c;
 const MOTOR = 0x3e4a5c;
 const MOTOR_CAP = 0x1a212b;
 const RING = 0xb7c0ca;
@@ -488,7 +487,10 @@ export function draw(canvas, st) {
   const py1 = py0 + s.plateH;
   const midY = (py0 + py1) / 2;
   box(bx, (deckY + py0) / 2, 0, 0.04, py0 - deckY - 0.02, 0.04, yaw, FRAME);
-  // Sail as Z-strips so a near edge can't depth-sort over the whole track.
+  // Strips keep a near corner from sorting over the whole track. They
+  // overlap so the join antialiases onto the same grey, instead of a dark
+  // crack that opens and closes as the camera moves. No separate edge rail:
+  // that rail was charcoal, and only parts of it won the sort.
   {
     const hx = 0.012;
     const hy = s.plateH / 2;
@@ -496,23 +498,24 @@ export function draw(canvas, st) {
     const c = Math.cos(yaw);
     const sn = Math.sin(yaw);
     const corner = (x, y, z) => [bx + x * c - z * sn, midY + y, x * sn + z * c];
-    const strips = 10;
+    const strips = 8;
+    const lap = 0.04;
+    // Only the face toward the camera. The far skin is a darker grey a
+    // centimetre behind, and from some angles its edge paints over the
+    // near border as a charcoal line.
+    const facingFront = c * (cam.eye[0] - bx) + sn * cam.eye[2] >= 0;
+    const xSkin = facingFront ? hx : -hx;
+    const tone = facingFront ? 1.05 : 0.72;
     for (let i = 0; i < strips; i++) {
-      const z0 = -hz + (i / strips) * s.plateW;
-      const z1 = -hz + ((i + 1) / strips) * s.plateW;
-      add(
-        [corner(hx, -hy, z0), corner(hx, -hy, z1), corner(hx, hy, z1), corner(hx, hy, z0)],
-        shade(PLATE, 1.05)
-      );
-      add(
-        [corner(-hx, -hy, z0), corner(-hx, hy, z0), corner(-hx, hy, z1), corner(-hx, -hy, z1)],
-        shade(PLATE, 0.72)
-      );
+      let z0 = -hz + (i / strips) * s.plateW;
+      let z1 = -hz + ((i + 1) / strips) * s.plateW;
+      if (i > 0) z0 -= lap;
+      if (i < strips - 1) z1 += lap;
+      const skin = facingFront
+        ? [corner(xSkin, -hy, z0), corner(xSkin, -hy, z1), corner(xSkin, hy, z1), corner(xSkin, hy, z0)]
+        : [corner(xSkin, -hy, z0), corner(xSkin, hy, z0), corner(xSkin, hy, z1), corner(xSkin, -hy, z1)];
+      add(skin, shade(PLATE, tone));
     }
-    // Stand the edge rails proud of the skin. Matching its thickness made them
-    // z-fight, so they only resolved on whichever face won the sort.
-    box(bx, py1 - 0.018, 0, 0.056, 0.036, s.plateW, yaw, PLATE_EDGE);
-    box(bx, py0 + 0.018, 0, 0.056, 0.036, s.plateW, yaw, PLATE_EDGE);
   }
 
   // One outline per rail. A tube built from facets has a joint every piece
