@@ -10,8 +10,8 @@ import {
   sampleCycle,
   solvePlan,
   step,
-} from "./sim.js?v=93";
-import { draw, bindCam } from "./view.js?v=93";
+} from "./sim.js?v=94";
+import { draw, bindCam } from "./view.js?v=94";
 
 // v3: the reference sail is 2.5×4 m on a 10 m track with a 0.5 s turn.
 // Saved v2 specs would put the old 5×2 m machine back on screen.

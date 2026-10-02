@@ -1,6 +1,6 @@
 /** Side view of the machine. Face-on sail is the thin plate. Edge-on sail faces the camera. */
 
-import { stroke } from "./sim.js?v=93";
+import { stroke } from "./sim.js?v=94";
 
 function sub(a, b) {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -715,9 +715,9 @@ export function draw(canvas, st) {
       const q = project([p.x, p.y, p.z]);
       if (!q || q.z < 0.4) continue;
       const back = project([
-        p.x - (speed + p.ox) * 0.01,
-        p.y - p.oy * 0.01,
-        p.z - p.oz * 0.01,
+        p.x - (speed + p.ox) * 0.003,
+        p.y - p.oy * 0.003,
+        p.z - p.oz * 0.003,
       ]);
       windDraw.push({ p, q, back, z: q.z });
     }
@@ -772,7 +772,7 @@ function paintGrain(ctx, dot) {
   let dx = b.x - a.x;
   let dy = b.y - a.y;
   const len = Math.hypot(dx, dy) || 1;
-  const reach = Math.min(len, 1.5);
+  const reach = Math.min(len, 0.4);
   const x2 = a.x + (dx / len) * reach;
   const y2 = a.y + (dy / len) * reach;
   ctx.globalAlpha = dot.p.a * Math.min(1, 14 / dot.z);
