@@ -1,6 +1,6 @@
 /** Side view of the machine. Face-on sail is the thin plate. Edge-on sail faces the camera. */
 
-import { stroke } from "./sim.js?v=83";
+import { stroke } from "./sim.js?v=84";
 
 function sub(a, b) {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -188,7 +188,12 @@ export function draw(canvas, st) {
   const s = st.specs;
   followX = st.x;
 
-  const target = [followX + 0.35, 1.35, 0];
+  // Looking higher than the old 1.35 aim drops the track in the frame.
+  // Extra sail height lifts the aim again, so the top stays inside and the
+  // track drops with it.
+  const sailTop = 0.61 + s.plateH;
+  const aimY = 1.75 + Math.max(0, sailTop - 2.61) * 0.55;
+  const target = [followX + 0.35, aimY, 0];
   const cp = Math.cos(camCtl.pitch);
   const sp = Math.sin(camCtl.pitch);
   const cy = Math.cos(camCtl.yaw);
@@ -352,34 +357,40 @@ export function draw(canvas, st) {
   const railR = 0.05;
   const railY = 0.2;
   const gauge = s.gauge;
-  const { lo, hi, cap0, cap1 } = stroke(s);
-  let x0 = followX - 4.2;
-  let x1 = followX + 4.2;
-  if (followX < lo + 2.2) x0 = cap0 - 0.2;
-  if (followX > hi - 2.2) x1 = cap1 + 0.2;
-  x0 = Math.max(cap0 - 0.2, x0);
-  x1 = Math.min(cap1 + 0.2, x1);
+  const { cap0, cap1 } = stroke(s);
   const bx = st.x;
   const spin = -st.x / 0.062;
 
-  {
-    const foot = project([bx, 0.02, 0]);
-    if (foot) {
-      const rx = Math.max(48, 2200 / Math.max(2.5, foot.z));
-      const ry = rx * 0.28;
-      const g = ctx.createRadialGradient(foot.x, foot.y, rx * 0.08, foot.x, foot.y, rx);
-      g.addColorStop(0, "rgba(0, 0, 0, 0.38)");
-      g.addColorStop(0.55, "rgba(0, 0, 0, 0.14)");
-      g.addColorStop(1, "rgba(0, 0, 0, 0)");
-      ctx.fillStyle = g;
-      ctx.beginPath();
-      ctx.ellipse(foot.x, foot.y, rx, ry, 0, 0, Math.PI * 2);
-      ctx.fill();
+  // Where the view meets the rail plane. The old window was a fixed few
+  // metres, which is why the rails stopped at the edge of the ground shadow.
+  function railHitX(sx, sy) {
+    const nx = (sx - w / 2) / cam.fLen;
+    const ny = (h / 2 - sy) / cam.fLen;
+    const vx = cam.xaxis[0] * nx + cam.yaxis[0] * ny - cam.zaxis[0];
+    const vy = cam.xaxis[1] * nx + cam.yaxis[1] * ny - cam.zaxis[1];
+    if (Math.abs(vy) < 1e-4) return null;
+    const t = (railY - cam.eye[1]) / vy;
+    if (t < 0.02) return null;
+    const x = cam.eye[0] + t * vx;
+    if (Math.abs(x - followX) > 80) return null;
+    return x;
+  }
+  let xLo = Infinity;
+  let xHi = -Infinity;
+  for (let i = 0; i <= 4; i++) {
+    for (let j = 0; j <= 4; j++) {
+      const x = railHitX(-w * 0.12 + (w * 1.24 * i) / 4, (h * 1.08 * j) / 4);
+      if (x == null) continue;
+      if (x < xLo) xLo = x;
+      if (x > xHi) xHi = x;
     }
   }
-
-  const rail0 = Math.max(cap0, x0);
-  const rail1 = Math.min(cap1, x1);
+  if (!(xHi > xLo)) {
+    xLo = followX - 12;
+    xHi = followX + 12;
+  }
+  const rail0 = Math.max(cap0 - 0.05, xLo);
+  const rail1 = Math.min(cap1 + 0.05, xHi);
 
   // Keep every rung. Dropping the ones near the cart made the ladder vanish
   // under the bogie and pop back in once it had passed.
@@ -389,8 +400,8 @@ export function draw(canvas, st) {
     wheel([x, railY - 0.012, 0], "z", 0.02, gauge - railR * 2 - 0.02, RUNG, 0, false, true, 2, true);
   }
 
-  if (x0 < cap0 + 0.45) box(cap0, railY + 0.1, 0, 0.07, 0.32, gauge + 0.16, 0, STOP);
-  if (x1 > cap1 - 0.45) box(cap1, railY + 0.1, 0, 0.07, 0.32, gauge + 0.16, 0, STOP);
+  if (rail0 <= cap0 + 0.4) box(cap0, railY + 0.1, 0, 0.07, 0.32, gauge + 0.16, 0, STOP);
+  if (rail1 >= cap1 - 0.4) box(cap1, railY + 0.1, 0, 0.07, 0.32, gauge + 0.16, 0, STOP);
 
   const rails = [
     { y: railY, z: -gauge / 2, r: railR, color: RAIL },
