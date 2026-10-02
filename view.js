@@ -1,6 +1,6 @@
 /** Side view of the machine. Face-on sail is the thin plate. Edge-on sail faces the camera. */
 
-import { stroke } from "./sim.js?v=86";
+import { stroke } from "./sim.js?v=87";
 
 function sub(a, b) {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -76,10 +76,65 @@ function windDt(st) {
   return wall;
 }
 
-function reseedWind(p, origin, sailTop) {
-  p.x = origin - 6 - Math.random() * 10;
-  p.y = 0.45 + Math.random() * (sailTop + 0.8);
-  p.z = (Math.random() - 0.5) * 9;
+function reseedWind(p, origin, sailTop, atSail) {
+  p.ox = 0;
+  p.oy = 0;
+  p.oz = 0;
+  p.x = origin - 4 - Math.random() * 9;
+  if (atSail) {
+    p.y = 0.7 + Math.random() * Math.max(0.5, sailTop - 0.4);
+    p.z = (Math.random() - 0.5) * 4.4;
+  } else {
+    p.y = 0.4 + Math.random() * (sailTop + 1.1);
+    p.z = (Math.random() - 0.5) * 9;
+  }
+}
+
+/**
+ * Extra velocity so the free stream does not pass through the plate.
+ * Face-on, air headed at the sail is pushed to the nearest edge and a
+ * slower wake trails behind. Edge-on, the plate blocks nothing and the
+ * extra velocity is zero. This is the same plate the force model uses,
+ * drawn as a kinematic split, not a solved flow field.
+ */
+function sailWash(p, sail) {
+  const c = Math.cos(sail.yaw);
+  const s = Math.sin(sail.yaw);
+  const dx = p.x - sail.bx;
+  const lx = dx * c + p.z * s;
+  const ly = p.y - sail.midY;
+  const lz = -dx * s + p.z * c;
+  const block = Math.abs(c);
+  const U = sail.U;
+  if (block < 0.04 || Math.abs(U) < 0.15) return [0, 0, 0];
+  const reach = 1.15 * Math.max(sail.halfH, sail.halfW);
+  const up = Math.sign(U * c) || 1;
+  const upstream = -lx * up;
+  const ny = Math.abs(ly) / sail.halfH;
+  const nz = Math.abs(lz) / sail.halfW;
+  const cover = Math.max(ny, nz);
+  let vy = 0;
+  let vzL = 0;
+  let slow = 0;
+  if (upstream > -0.2 && upstream < reach && cover < 1.4) {
+    const near = Math.max(0, 1 - upstream / reach);
+    const spill = Math.max(0, 1.2 - cover);
+    const push = block * near * near * spill * Math.abs(U);
+    const roomY = sail.halfH - Math.abs(ly);
+    const roomZ = sail.halfW - Math.abs(lz);
+    if (roomY < roomZ) vy = (ly < 0 ? -1 : 1) * push;
+    else vzL = (lz < 0 ? -1 : 1) * push;
+    slow = block * near * Math.max(0, 1 - cover) * Math.abs(U) * 0.75;
+  }
+  const down = -upstream;
+  if (down > 0 && down < reach * 1.5 && cover < 1.05) {
+    const fade = Math.max(0, 1 - down / (reach * 1.5));
+    slow += block * fade * Math.abs(U) * 0.6;
+    vy += (ly < 0 ? -1 : 1) * block * fade * Math.abs(U) * 0.18;
+    vzL += (lz < 0 ? -1 : 1) * block * fade * Math.abs(U) * 0.18;
+  }
+  const flow = Math.sign(U) || 1;
+  return [-slow * flow - vzL * s, vy, vzL * c];
 }
 
 const CAM0 = {
@@ -599,29 +654,69 @@ export function draw(canvas, st) {
     ctx.fill();
   }
 
-  // Behind the machine. A streak is the distance the air travels in a
-  // fixed fraction of a second, so the slider changes both speed and length.
+  // Behind the machine. Free stream runs down the track at the slider
+  // speed. Near the plate, sailWash adds the split around it.
   {
     const dt = windDt(st);
     const speed = Math.max(0, s.wind);
-    const sailAir = 0.61 + s.plateH;
-    const count = 40 + Math.round(speed * 2.5);
+    const sailAir = py1;
+    const count = 48 + Math.round(speed * 2.2);
     while (windParts.length < count) {
-      const p = { x: 0, y: 0, z: 0 };
-      reseedWind(p, followX, sailAir);
-      p.x = followX + (Math.random() - 0.5) * 22;
+      const p = { x: 0, y: 0, z: 0, ox: 0, oy: 0, oz: 0 };
+      reseedWind(p, followX, sailAir, windParts.length % 2 === 0);
+      p.x = followX + (Math.random() - 0.55) * 20;
       windParts.push(p);
     }
-    const span = speed * 0.16;
+    const sail = {
+      bx,
+      midY,
+      yaw,
+      halfH: s.plateH / 2,
+      halfW: s.plateW / 2,
+      U: speed - st.vx,
+    };
     ctx.save();
     ctx.lineCap = "round";
     ctx.strokeStyle = "rgba(186, 214, 232, 0.9)";
     for (let i = 0; i < count; i++) {
       const p = windParts[i];
-      p.x += speed * dt;
-      if (p.x > followX + 14 || p.y > sailAir + 1.6 || p.y < 0.2) reseedWind(p, followX, sailAir);
+      const wash = sailWash(p, sail);
+      p.ox += (wash[0] - (p.ox || 0)) * 0.55;
+      p.oy += (wash[1] - (p.oy || 0)) * 0.55;
+      p.oz += (wash[2] - (p.oz || 0)) * 0.55;
+      const vx = speed + p.ox;
+      const vy = p.oy;
+      const vz = p.oz;
+      p.x += vx * dt;
+      p.y += vy * dt;
+      p.z += vz * dt;
+      // A step can jump the thin plate. Put that air out at the nearest edge.
+      if (Math.abs(Math.cos(yaw)) > 0.2) {
+        const c = Math.cos(yaw);
+        const sn = Math.sin(yaw);
+        const dx = p.x - bx;
+        const lx = dx * c + p.z * sn;
+        const ly = p.y - midY;
+        const lz = -dx * sn + p.z * c;
+        const hH = s.plateH / 2;
+        const hW = s.plateW / 2;
+        if (Math.abs(lx) < 0.25 && Math.abs(ly) < hH && Math.abs(lz) < hW) {
+          const up = Math.sign(sail.U * c) || 1;
+          let ly2 = ly;
+          let lz2 = lz;
+          if (hH - Math.abs(ly) < hW - Math.abs(lz)) ly2 = (ly < 0 ? -1 : 1) * (hH + 0.18);
+          else lz2 = (lz < 0 ? -1 : 1) * (hW + 0.18);
+          const lx2 = -0.06 * up;
+          p.x = bx + lx2 * c - lz2 * sn;
+          p.y = midY + ly2;
+          p.z = lx2 * sn + lz2 * c;
+        }
+      }
+      if (p.x > followX + 16 || p.x < followX - 18 || p.y > sailAir + 2.4 || p.y < 0.15) {
+        reseedWind(p, followX, sailAir, i % 2 === 0);
+      }
       const head = project([p.x, p.y, p.z]);
-      const tail = project([p.x - span, p.y, p.z]);
+      const tail = project([p.x - vx * 0.16, p.y - vy * 0.16, p.z - vz * 0.16]);
       if (!head || !tail || head.z < 0.4) continue;
       ctx.globalAlpha = Math.min(0.55, 0.14 + speed / 70) * Math.min(1, 14 / head.z);
       ctx.lineWidth = Math.max(1, 8 / head.z);
@@ -646,6 +741,34 @@ export function draw(canvas, st) {
     ctx.fillStyle = hex(poly.color);
     ctx.fill();
   }
+
+  // Air that has spilled past the plate and is closer than it. Drawn after
+  // the sail so the split is not hidden behind the face.
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.strokeStyle = "rgba(186, 214, 232, 0.95)";
+  const sailDepth = depthOf([bx, midY, 0]);
+  const wc = Math.cos(yaw);
+  const ws = Math.sin(yaw);
+  for (const p of windParts) {
+    if (depthOf([p.x, p.y, p.z]) > sailDepth - 0.05) continue;
+    const ly = p.y - midY;
+    const lz = -(p.x - bx) * ws + p.z * wc;
+    if (Math.abs(ly) < s.plateH / 2 && Math.abs(lz) < s.plateW / 2) continue;
+    const vx = s.wind + (p.ox || 0);
+    const vy = p.oy || 0;
+    const vz = p.oz || 0;
+    const head = project([p.x, p.y, p.z]);
+    const tail = project([p.x - vx * 0.16, p.y - vy * 0.16, p.z - vz * 0.16]);
+    if (!head || !tail || head.z < 0.4) continue;
+    ctx.globalAlpha = Math.min(0.6, 0.18 + s.wind / 60) * Math.min(1, 12 / head.z);
+    ctx.lineWidth = Math.max(1, 8 / head.z);
+    ctx.beginPath();
+    ctx.moveTo(tail.x, tail.y);
+    ctx.lineTo(head.x, head.y);
+    ctx.stroke();
+  }
+  ctx.restore();
 
   windArrow(ctx, cam);
 }
