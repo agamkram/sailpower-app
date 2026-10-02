@@ -1,6 +1,6 @@
 /** Side view of the machine. Face-on sail is the thin plate. Edge-on sail faces the camera. */
 
-import { stroke } from "./sim.js?v=85";
+import { stroke } from "./sim.js?v=86";
 
 function sub(a, b) {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -50,6 +50,37 @@ const SKATE_MOT = 0x6eb6e0;
 const STOP = 0x6e1218;
 
 let followX = null;
+
+// Free-stream markers. The model’s wind is a uniform flow along +x, not a
+// solved field, so these move at that speed and nothing else. While the sim
+// is running they share its clock, including the rate button. While it is
+// paused they keep drifting on the wall clock so the slider still shows.
+const windParts = [];
+let windWall = 0;
+let windSim = null;
+
+function windDt(st) {
+  const now = performance.now() / 1000;
+  const wall = windWall ? Math.min(0.05, now - windWall) : 0.016;
+  windWall = now;
+  if (windSim == null || st.time + 0.05 < windSim) {
+    windSim = st.time;
+    return wall;
+  }
+  if (st.time > windSim + 1e-4) {
+    const dt = Math.min(0.25, st.time - windSim);
+    windSim = st.time;
+    return dt;
+  }
+  windSim = st.time;
+  return wall;
+}
+
+function reseedWind(p, origin, sailTop) {
+  p.x = origin - 6 - Math.random() * 10;
+  p.y = 0.45 + Math.random() * (sailTop + 0.8);
+  p.z = (Math.random() - 0.5) * 9;
+}
 
 const CAM0 = {
   yaw: Math.atan2(-1.7, 7.78),
@@ -566,6 +597,40 @@ export function draw(canvas, st) {
     ctx.closePath();
     ctx.fillStyle = hex(color);
     ctx.fill();
+  }
+
+  // Behind the machine. A streak is the distance the air travels in a
+  // fixed fraction of a second, so the slider changes both speed and length.
+  {
+    const dt = windDt(st);
+    const speed = Math.max(0, s.wind);
+    const sailAir = 0.61 + s.plateH;
+    const count = 40 + Math.round(speed * 2.5);
+    while (windParts.length < count) {
+      const p = { x: 0, y: 0, z: 0 };
+      reseedWind(p, followX, sailAir);
+      p.x = followX + (Math.random() - 0.5) * 22;
+      windParts.push(p);
+    }
+    const span = speed * 0.16;
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.strokeStyle = "rgba(186, 214, 232, 0.9)";
+    for (let i = 0; i < count; i++) {
+      const p = windParts[i];
+      p.x += speed * dt;
+      if (p.x > followX + 14 || p.y > sailAir + 1.6 || p.y < 0.2) reseedWind(p, followX, sailAir);
+      const head = project([p.x, p.y, p.z]);
+      const tail = project([p.x - span, p.y, p.z]);
+      if (!head || !tail || head.z < 0.4) continue;
+      ctx.globalAlpha = Math.min(0.55, 0.14 + speed / 70) * Math.min(1, 14 / head.z);
+      ctx.lineWidth = Math.max(1, 8 / head.z);
+      ctx.beginPath();
+      ctx.moveTo(tail.x, tail.y);
+      ctx.lineTo(head.x, head.y);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   // Far rail first, then the meshes, so the cart and the coils cover the bar.
