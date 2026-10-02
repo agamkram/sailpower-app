@@ -82,6 +82,7 @@ html.pwa-standalone .fit-stage {
 header {
   flex: 0 0 auto;
   text-align: center;
+  padding-bottom: 0.05rem;
 }
 
 header h1 {
@@ -93,12 +94,17 @@ header h1 {
 }
 
 .build {
-  margin-top: 0.12rem;
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  z-index: 2;
+  margin: 0;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
-  font-size: 0.62rem;
+  font-size: 0.55rem;
   font-weight: 500;
   letter-spacing: 0.03em;
-  color: var(--muted);
+  color: rgba(125, 143, 163, 0.85);
+  pointer-events: none;
 }
 
 .stage-wrap {
@@ -265,15 +271,15 @@ button.stop { background: #5c2430; border-color: rgba(248, 113, 113, 0.45); }
   background: rgba(18, 26, 36, 0.96);
   border: 1px solid var(--border);
   border-radius: 14px;
-  padding: 0.7rem 0.75rem 0.85rem;
+  padding: 0.55rem 0.7rem 0.7rem;
   z-index: 5;
 }
 
 .sheet h2 {
   font-family: "Michroma", system-ui, sans-serif;
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   font-weight: 400;
-  margin-bottom: 0.45rem;
+  margin-bottom: 0.28rem;
 }
 
 .sheet[hidden] { display: none; }
@@ -281,18 +287,25 @@ button.stop { background: #5c2430; border-color: rgba(248, 113, 113, 0.45); }
 label.field {
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 0.15rem 0.6rem;
+  gap: 0 0.6rem;
   align-items: center;
-  margin-bottom: 0.45rem;
-  font-size: 0.72rem;
+  margin-bottom: 0.22rem;
+  font-size: 0.68rem;
   color: var(--muted);
+  line-height: 1.1;
 }
 
-label.field input[type="range"] { grid-column: 1 / -1; width: 100%; }
+label.field input[type="range"] {
+  grid-column: 1 / -1;
+  width: 100%;
+  height: 1.05rem;
+  margin: 0;
+}
+
 label.field output {
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   color: var(--text);
-  font-size: 0.72rem;
+  font-size: 0.68rem;
 }
 
 .sheet-actions { display: flex; gap: 0.4rem; justify-content: flex-end; }
