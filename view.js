@@ -55,7 +55,7 @@ let followX = null;
 
 export function draw(canvas, st) {
   const ctx = canvas.getContext("2d");
-  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const dpr = Math.min(1.25, window.devicePixelRatio || 1);
   const w = canvas.clientWidth;
   const h = canvas.clientHeight;
   if (w < 2 || h < 2) return;
@@ -124,13 +124,28 @@ export function draw(canvas, st) {
     if (clipped.length < 3) return;
     const proj = [];
     let z = 0;
+    let zMin = Infinity;
     for (const p of clipped) {
       const q = project(p);
       if (!q) return;
+      if (q.z < 0.45) return;
       proj.push(q);
       z += q.z;
+      if (q.z < zMin) zMin = q.z;
     }
-    if (proj.some((q) => Math.abs(q.x) > w * 4 || Math.abs(q.y) > h * 4)) return;
+    let x0 = Infinity;
+    let x1 = -Infinity;
+    let y0 = Infinity;
+    let y1 = -Infinity;
+    for (const q of proj) {
+      if (q.x < x0) x0 = q.x;
+      if (q.x > x1) x1 = q.x;
+      if (q.y < y0) y0 = q.y;
+      if (q.y > y1) y1 = q.y;
+    }
+    if (x1 - x0 > w * 1.8 || y1 - y0 > h * 1.8) return;
+    if (Math.abs(x0) > w * 2 || Math.abs(x1) > w * 2) return;
+    if (Math.abs(y0) > h * 2 || Math.abs(y1) > h * 2) return;
     polys.push({ proj, color, z: z / proj.length });
   }
   function ring(c, axis, r, off, spin) {
@@ -210,8 +225,8 @@ export function draw(canvas, st) {
   const railR = 0.05;
   const railY = 0.2;
   const gauge = s.gauge;
-  const x0 = followX - 2.6;
-  const x1 = followX + 2.6;
+  const x0 = followX - 2.1;
+  const x1 = followX + 2.1;
   const bx = st.x;
   const spin = -st.x / 0.062;
 
@@ -228,20 +243,19 @@ export function draw(canvas, st) {
   }
 
   for (const z of [-gauge / 2, gauge / 2]) {
-    const seg = 0.42;
+    const seg = 0.55;
     for (let x = x0; x < x1; x += seg) {
       const a0 = Math.max(0, x);
       const a1 = Math.min(s.track, x + seg);
       if (a1 - a0 < 0.05) continue;
-      const mid = (a0 + a1) / 2;
-      wheel([mid, railY, z], "x", railR, a1 - a0, RAIL, 0, false);
+      box((a0 + a1) / 2, railY, z, a1 - a0 + 0.012, railR * 1.7, railR * 1.7, 0, RAIL);
     }
   }
 
   for (let x = Math.floor(x0 * 2) / 2; x < x1; x += 0.38) {
     if (x < 0.05 || x > s.track - 0.05) continue;
     if (Math.abs(x - bx) < 0.5) continue;
-    wheel([x, railY - 0.012, 0], "z", 0.02, gauge - railR * 2 - 0.02, RUNG, 0, false);
+    box(x, railY - 0.01, 0, 0.03, 0.028, gauge - railR * 2.2, 0, RUNG);
   }
 
   if (x0 < 0.08 && x1 > 0) box(0.04, railY + 0.08, 0, 0.04, 0.22, gauge + 0.08, 0, STOP);
@@ -252,9 +266,13 @@ export function draw(canvas, st) {
   const span0 = Math.max(0, x0);
   const span1 = Math.min(s.track, x1);
   if (span1 > span0) {
-    const mid = (span0 + span1) / 2;
-    const len = span1 - span0;
-    box(mid, railY, 0, len, 0.032, 0.055, 0, 0xc5d2df);
+    const seg = 0.55;
+    for (let x = span0; x < span1; x += seg) {
+      const a0 = x;
+      const a1 = Math.min(span1, x + seg);
+      if (a1 - a0 < 0.05) continue;
+      box((a0 + a1) / 2, railY, 0, a1 - a0 + 0.04, 0.032, 0.055, 0, 0xc5d2df);
+    }
   }
 
   const topR = 0.058;
@@ -322,23 +340,113 @@ export function draw(canvas, st) {
   const py1 = py0 + s.plateH;
   const midY = (py0 + py1) / 2;
   box(bx, (deckY + py0) / 2, 0, 0.045, py0 - deckY, 0.045, yaw, FRAME);
-  box(bx, midY, 0, 0.018, s.plateH, s.plateW, yaw, PLATE);
-  box(bx, py1 - 0.015, 0, 0.028, 0.03, s.plateW, yaw, PLATE_EDGE);
-  box(bx, py0 + 0.015, 0, 0.028, 0.03, s.plateW, yaw, PLATE_EDGE);
-  for (const end of [-1, 1]) {
-    const [ox, oz] = yawXZ(0, end * (s.plateW / 2 - 0.015), yaw);
-    box(bx + ox, midY, oz, 0.028, s.plateH, 0.03, yaw, PLATE_EDGE);
+  {
+    const hx = 0.011;
+    const hy = s.plateH / 2;
+    const hz = s.plateW / 2;
+    const c = Math.cos(yaw);
+    const sn = Math.sin(yaw);
+    const corner = (x, y, z) => [bx + x * c - z * sn, midY + y, x * sn + z * c];
+    const strips = 8;
+    for (let i = 0; i < strips; i++) {
+      const z0 = -hz + (i / strips) * s.plateW;
+      const z1 = -hz + ((i + 1) / strips) * s.plateW;
+      add(
+        [corner(hx, -hy, z0), corner(hx, -hy, z1), corner(hx, hy, z1), corner(hx, hy, z0)],
+        shade(PLATE, 1.05)
+      );
+      add(
+        [corner(-hx, -hy, z0), corner(-hx, hy, z0), corner(-hx, hy, z1), corner(-hx, -hy, z1)],
+        shade(PLATE, 0.72)
+      );
+    }
+    const rim = Math.max(0.16, s.plateW * 0.04);
+    box(bx, py1 - 0.01, 0, 0.03, 0.02, s.plateW - rim, yaw, PLATE_EDGE);
+    box(bx, py0 + 0.01, 0, 0.03, 0.02, s.plateW - rim, yaw, PLATE_EDGE);
   }
 
   polys.sort((a, b) => b.z - a.z);
-  for (const poly of polys) {
-    ctx.beginPath();
-    ctx.moveTo(poly.proj[0].x, poly.proj[0].y);
-    for (let i = 1; i < poly.proj.length; i++) ctx.lineTo(poly.proj[i].x, poly.proj[i].y);
-    ctx.closePath();
-    ctx.fillStyle = hex(poly.color);
-    ctx.fill();
+  const iw = canvas.width;
+  const ih = canvas.height;
+  const depth = new Float32Array(Math.max(1, iw * ih));
+  depth.fill(1e9);
+  const img = ctx.createImageData(iw, ih);
+  const data = img.data;
+  // Rebuild the sky in device pixels — putImageData ignores the CSS transform.
+  for (let y = 0; y < ih; y++) {
+    const t = y / Math.max(1, ih - 1);
+    let r;
+    let g;
+    let b;
+    if (t < 0.45) {
+      const u = t / 0.45;
+      r = (0x16 + (0x0d - 0x16) * u) | 0;
+      g = (0x1d + (0x12 - 0x1d) * u) | 0;
+      b = (0x28 + (0x19 - 0x28) * u) | 0;
+    } else {
+      const u = (t - 0.45) / 0.55;
+      r = (0x0d + (0x07 - 0x0d) * u) | 0;
+      g = (0x12 + (0x0a - 0x12) * u) | 0;
+      b = (0x19 + (0x0e - 0x19) * u) | 0;
+    }
+    for (let x = 0; x < iw; x++) {
+      const o = (y * iw + x) * 4;
+      data[o] = r;
+      data[o + 1] = g;
+      data[o + 2] = b;
+      data[o + 3] = 255;
+    }
   }
+
+  function putTri(ax, ay, az, bx, by, bz, cx, cy, cz, r, g, b) {
+    ax *= dpr;
+    ay *= dpr;
+    bx *= dpr;
+    by *= dpr;
+    cx *= dpr;
+    cy *= dpr;
+    let minX = Math.max(0, Math.floor(Math.min(ax, bx, cx)));
+    let maxX = Math.min(iw - 1, Math.ceil(Math.max(ax, bx, cx)));
+    let minY = Math.max(0, Math.floor(Math.min(ay, by, cy)));
+    let maxY = Math.min(ih - 1, Math.ceil(Math.max(ay, by, cy)));
+    if (minX > maxX || minY > maxY) return;
+    const area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+    if (Math.abs(area) < 1e-6) return;
+    const inv = 1 / area;
+    for (let y = minY; y <= maxY; y++) {
+      for (let x = minX; x <= maxX; x++) {
+        const wA = ((bx - x) * (cy - y) - (by - y) * (cx - x)) * inv;
+        const wB = ((cx - x) * (ay - y) - (cy - y) * (ax - x)) * inv;
+        const wC = 1 - wA - wB;
+        if (wA < -0.001 || wB < -0.001 || wC < -0.001) continue;
+        const z = wA * az + wB * bz + wC * cz;
+        const di = y * iw + x;
+        if (z >= depth[di]) continue;
+        depth[di] = z;
+        const o = di * 4;
+        data[o] = r;
+        data[o + 1] = g;
+        data[o + 2] = b;
+        data[o + 3] = 255;
+      }
+    }
+  }
+
+  for (const poly of polys) {
+    const col = poly.color;
+    const r = (col >> 16) & 255;
+    const g = (col >> 8) & 255;
+    const b = col & 255;
+    const p0 = poly.proj[0];
+    for (let i = 1; i < poly.proj.length - 1; i++) {
+      const p1 = poly.proj[i];
+      const p2 = poly.proj[i + 1];
+      putTri(p0.x, p0.y, p0.z, p1.x, p1.y, p1.z, p2.x, p2.y, p2.z, r, g, b);
+    }
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.putImageData(img, 0, 0);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
   ctx.fillStyle = "rgba(232,237,244,0.78)";
   ctx.font = "600 12px 'DM Sans', system-ui, sans-serif";
