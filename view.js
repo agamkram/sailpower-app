@@ -206,7 +206,6 @@ export function draw(canvas, st) {
   const cam = { eye, xaxis, yaxis, zaxis, fLen, w, h };
 
   const polys = [];
-  const trackPolys = [];
   function depthOf(p) {
     return -dot(sub(p, cam.eye), cam.zaxis);
   }
@@ -251,9 +250,9 @@ export function draw(canvas, st) {
     area = Math.abs(area) * 0.5;
     if (area < 0.35) return;
     if (maxEdge > Math.hypot(w, h) * 1.8) return;
-    const poly = { proj, color, z: z / proj.length - layer * 0.08, layer };
-    if (layer >= 2) trackPolys.push(poly);
-    else polys.push(poly);
+    // Track sits a hair further away so it loses ties against the cart that
+    // rides on it, rather than being painted over the top of everything.
+    polys.push({ proj, color, z: z / proj.length + layer * 0.02, layer });
   }
   function ring(c, axis, r, off, spin) {
     const N = 10;
@@ -477,35 +476,73 @@ export function draw(canvas, st) {
         shade(PLATE, 0.72)
       );
     }
-    box(bx, py1 - 0.012, 0, 0.026, 0.024, s.plateW * 0.9, yaw, PLATE_EDGE);
-    box(bx, py0 + 0.012, 0, 0.026, 0.024, s.plateW * 0.9, yaw, PLATE_EDGE);
+    // Stand the edge rails proud of the skin. Matching its thickness made them
+    // z-fight, so they only resolved on whichever face won the sort.
+    box(bx, py1 - 0.018, 0, 0.056, 0.036, s.plateW, yaw, PLATE_EDGE);
+    box(bx, py0 + 0.018, 0, 0.056, 0.036, s.plateW, yaw, PLATE_EDGE);
   }
 
-  polys.sort((a, b) => b.z - a.z || a.layer - b.layer);
-  trackPolys.sort((a, b) => b.z - a.z);
-  function paintList(list) {
-    for (const poly of list) {
-      ctx.beginPath();
-      ctx.moveTo(poly.proj[0].x, poly.proj[0].y);
-      for (let i = 1; i < poly.proj.length; i++) ctx.lineTo(poly.proj[i].x, poly.proj[i].y);
-      ctx.closePath();
-      ctx.fillStyle = hex(poly.color);
+  polys.sort((a, b) => b.z - a.z || b.layer - a.layer);
+  for (const poly of polys) {
+    ctx.beginPath();
+    ctx.moveTo(poly.proj[0].x, poly.proj[0].y);
+    for (let i = 1; i < poly.proj.length; i++) ctx.lineTo(poly.proj[i].x, poly.proj[i].y);
+    ctx.closePath();
+    ctx.fillStyle = hex(poly.color);
+    ctx.fill();
+  }
+
+  windArrow(ctx, cam);
+}
+
+/**
+ * The wind blows along world +x, so the badge has to turn with the camera.
+ * When it points nearly at or away from the viewer there is no direction left
+ * to draw, and the conventional dot-in-circle or cross-in-circle says it.
+ */
+function windArrow(ctx, cam) {
+  const ink = "rgba(232,237,244,0.78)";
+  const dir = [1, 0, 0];
+  const sx = dot(dir, cam.xaxis);
+  const sy = -dot(dir, cam.yaxis);
+  const toward = -dot(dir, cam.zaxis);
+  const flat = Math.hypot(sx, sy);
+
+  ctx.save();
+  ctx.fillStyle = ink;
+  ctx.strokeStyle = ink;
+  ctx.lineWidth = 1.5;
+  ctx.font = "600 12px 'DM Sans', system-ui, sans-serif";
+  ctx.textBaseline = "middle";
+  ctx.fillText("wind", 14, 20);
+
+  ctx.translate(78, 20);
+  if (flat < 0.18) {
+    ctx.beginPath();
+    ctx.arc(0, 0, 6, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    if (toward > 0) {
+      ctx.moveTo(-4, -4);
+      ctx.lineTo(4, 4);
+      ctx.moveTo(4, -4);
+      ctx.lineTo(-4, 4);
+      ctx.stroke();
+    } else {
+      ctx.arc(0, 0, 2, 0, Math.PI * 2);
       ctx.fill();
     }
+  } else {
+    const half = 19 * flat;
+    ctx.rotate(Math.atan2(sy, sx));
+    ctx.beginPath();
+    ctx.moveTo(-half, 0);
+    ctx.lineTo(half, 0);
+    ctx.moveTo(half, 0);
+    ctx.lineTo(half - 5, -4);
+    ctx.moveTo(half, 0);
+    ctx.lineTo(half - 5, 4);
+    ctx.stroke();
   }
-  paintList(polys);
-  paintList(trackPolys);
-
-  ctx.fillStyle = "rgba(232,237,244,0.78)";
-  ctx.font = "600 12px 'DM Sans', system-ui, sans-serif";
-  ctx.fillText("wind", 14, 22);
-  ctx.beginPath();
-  ctx.moveTo(58, 18);
-  ctx.lineTo(96, 18);
-  ctx.lineTo(90, 13);
-  ctx.moveTo(96, 18);
-  ctx.lineTo(90, 23);
-  ctx.strokeStyle = "rgba(232,237,244,0.78)";
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
+  ctx.restore();
 }
