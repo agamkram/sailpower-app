@@ -14,14 +14,32 @@ seconds early" never meant that.
 A plan is now two numbers, and cruise speed is a spec, not part of the plan.
 
   turn      how long the 90 degree slew takes
-  turnLead  how many seconds before the cart reaches rest the slew begins
-            0            turn only once stopped
-            = turn       the slew finishes exactly as the cart stops
-            > turn       the slew finishes while the cart is still moving
+  turnLead  where that slew sits relative to arrival, as a fraction of its own
+            length
+            0   the slew begins once the cart is stopped
+            1   the slew finishes exactly as the cart stops
+
+turnLead was seconds at first, and that was wrong. The cart cruises out at
+2.4 m/s and comes home at 8, so the same number of seconds is a short distance
+one way and a long one the other. A one second lead left the sail wide open
+four metres from home with the motor still hauling against it, and the setting
+that was meant to read "slightly early" collapsed to five watts. Tied to the
+turn instead, it means the same thing in both directions and cannot ask for the
+sail to be open before the cart has arrived.
 
 Braking starts where the stopping distance says it must. The lead reaches back
 into the cruise, so a long lead really does turn the sail while it is still
 making power, and the numbers show what that costs.
+
+The sail angle is a command, not a commitment. Inside the lead it drives toward
+the angle the stroke ends on, outside it drives back to the angle the stroke
+runs at. A one-way turn meant a sail that opened too early kept opening while
+the wind drove the cart backwards, until it sat pinned against the far cap half
+open with nothing left to try.
+
+Braking only promises to stop the cart, not to stop it at the cap, and in a
+strong wind it stops short. The last stretch into each cap is closed at a creep
+speed instead.
 
 Presets vary turnLead alone, so the selector compares turn timing and nothing
 else. Everything else is a spec slider.
@@ -47,17 +65,19 @@ Carried:
   rolling     crr against weight plus the sail thrust reacted through the
               guide rollers, which at 10 m/s is about twice the weight
   end stops   kinetic energy absorbed by a stop is charged, not deleted
-  feathering  the sail never comes further into the wind than the rail can
-              hold against
+  feathering  a stopping aid, not a cruise setting. Out on the power stroke a
+              sail that out-pushes the coils just drives the cart faster until
+              the forces balance, so the sail only sheds load while braking
+              and turning at the far cap, where authority is really at stake
 
 Budget at the default, in watts:
 
-  made          713
-  motor home   -147
-  slew drive    -50
+  made          705
+  motor home   -144
+  slew drive    -47
   copper+iron   -26
-  end stops      -4
-  net           487     cycle 11.6 s, coils saturated 1% of the time
+  end stops      -3
+  net           484     cycle 11.8 s
 
 Not carried: wind shear and gusts, unsteady aerodynamics beyond added mass,
 side force and the overturning moment on the guide wheels, sail flex, thermal
@@ -69,15 +89,15 @@ The model used to see area and nothing else, so it could not tell a 5x2 sail
 from a 2x5. At a constant 10 m2, with the plan solved for each shape:
 
   sail        AR     Cd   I kg m2   turn s   net W
-  1.00x10.00 10.0  1.302      1.3     0.30     607
-  2.00x5.00   2.5  1.158      5.3     0.40     527
-  3.16x3.16   1.0  1.140     13.3     0.50     504
+  1.00x10.00 10.0  1.302      1.3     0.20     618
+  2.00x5.00   2.5  1.158      5.3     0.30     530
+  3.16x3.16   1.0  1.140     13.3     0.40     504
   5.00x2.00   2.5  1.158     33.3     0.70     487
   10.00x1.00 10.0  1.302    133.3     1.00     483
 
-1x10 and 10x1 have identical area and identical Cd and differ by 124 W. All of
+1x10 and 10x1 have identical area and identical Cd and differ by 135 W. All of
 it is yaw inertia. Tall and narrow wins twice over: it is the bluffer shape and
-it is cheap to turn. The best slew time tracks inertia, from 0.30 s for the
+it is cheap to turn. The best slew time tracks inertia, from 0.20 s for the
 slender sail to 1.00 s for the wide one.
 
 Cruise speed
@@ -90,22 +110,33 @@ other specs, which is why Solve exists rather than a hardcoded number.
 
 Above rated wind
 ----------------
-A 10 m2 sail out-pushes a 1000 N rail at about 12 m/s. The machine now sheds
-the excess by feathering instead of stalling:
+A 10 m2 sail out-pushes a 1000 N rail at about 12 m/s. That alone costs
+nothing, because out on the power stroke the surplus just accelerates the cart
+until the forces balance. What it threatens is the stop at the far cap, and
+that is the only place the sail sheds load:
 
-  wind   face-on N   feather
-     8         457        0 deg
-    12        1028       20 deg
-    16        1828       45 deg
-    20        2857       56 deg
-    25        4464       63 deg
-    30        6428       68 deg
+  wind   face-on N   max feather   net W
+     8         457         0 deg     250
+    12        1028         0 deg     808
+    16        1828        43 deg    1527
+    20        2857        55 deg    1667
+    25        4464        59 deg    2070
+    30        6428        55 deg    2274
 
-Power keeps climbing but Cp collapses, from 46% of the drag-device ceiling at
-10 m/s to 5% at 25 m/s, which is what a force-limited machine should do.
+Nothing feathers below about 14 m/s even though the sail passed the rail force
+at 12, because the cart is moving by the time it matters and the apparent wind
+has dropped. Power keeps climbing while Cp collapses, which is what a
+force-limited machine should do.
 
 Sanity
 ------
-Cp never exceeds 4/27*Cd anywhere in the config space. The best case found is
-54% of that ceiling, on a 40 m track. Nothing stalls between 4 and 30 m/s of
-wind, 0.5 to 32 m2 of sail, 8 to 40 m of track, or 300 to 3000 N of rail.
+Cp never exceeds the 4/27*Cd drag-device ceiling anywhere in the config space.
+The best case found is 56% of it, at 8 m/s on a 40 m track with a 3000 N rail.
+
+Across 1944 combinations of wind 4-30 m/s, sail 0.5-32 m2, track 8-40 m, rail
+300-3000 N and all four rotation presets, 71 fail to complete a cycle. 67 of
+those are honest: the sail out-pushes the rail even with the cart at rest, so
+there is no stopping it. The remaining 4 are unexplained corners.
+
+Every commanded rotation takes exactly the turn time. Sail movement that looks
+slower than that is feathering, which is continuous by nature.

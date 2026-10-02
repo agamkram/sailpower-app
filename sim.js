@@ -490,11 +490,13 @@ export function planInfo(s) {
  * One settled cycle, frame by frame, so it can be scrubbed by hand. Frames are
  * evenly spaced in time, which is what makes the slider linear to drag.
  */
-export function sampleCycle(specs, maxFrames = 1600) {
+export function sampleCycle(specs, maxFrames = 5000) {
   const dt = 0.02;
   const st = createState(specs);
+  // A small sail on a long track in light air takes well over a minute to come
+  // round. A short window reports that working plan as no plan at all.
   let g = 0;
-  while (st.cycles < 1 && g++ < 2000) step(st, dt);
+  while (st.cycles < 1 && g++ < 8000) step(st, dt);
   if (st.cycles < 1) return null;
   const mark = st.cycles;
   const frames = [];
