@@ -134,9 +134,18 @@ Cp never exceeds the 4/27*Cd drag-device ceiling anywhere in the config space.
 The best case found is 56% of it, at 8 m/s on a 40 m track with a 3000 N rail.
 
 Across 1944 combinations of wind 4-30 m/s, sail 0.5-32 m2, track 8-40 m, rail
-300-3000 N and all four rotation presets, 71 fail to complete a cycle. 67 of
-those are honest: the sail out-pushes the rail even with the cart at rest, so
-there is no stopping it. The remaining 4 are unexplained corners.
+300-3000 N and all four rotation presets, every one finishes a cycle. A rail
+that can hold the sail at rest always arrives under control. Where the sail
+out-pushes the rail at rest, feathering still saves most stops, because the
+cart is already moving and the apparent wind has dropped. 281 of them are not
+controlled arrivals: the end stop absorbs the hit and that energy is charged.
+
+The four corners that used to time out were one machine at each rotation
+preset. A 2 m2 sail in a 14 m/s wind on a 40 m track with a 300 N rail pushes
+280 N face-on, so the rail can hold it. Spare brake after feathering to 90%
+is 30 N. A floor at 40 N had called that no stop at all, the cart crept the
+whole track, and the sampler gave up at 160 s. Thirty newtons stops that cart
+in a few metres. The cycle takes about 19 s.
 
 Every commanded rotation takes exactly the turn time. Sail movement that looks
 slower than that is feathering, which is continuous by nature.

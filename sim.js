@@ -221,7 +221,11 @@ function brakeDist(s, speed, fa, mEff) {
   // cart enters the brake at the top of the stroke.
   const push = Math.min(speed >= 0 ? Math.max(0, fa) : Math.max(0, -fa), cap * 0.9);
   const net = cap - push;
-  if (net < 40) return Math.abs(speed) > 0.4 ? 1e6 : 0.15;
+  // No spare brake at all means there is nothing to stop with. A few tens of
+  // newtons is still a stop: a 300 N rail held to 90% has 30 N left, and that
+  // halts a light cart in a few metres. Treating that as impossible made the
+  // cart creep a whole long track and never be counted as a cycle.
+  if (net <= 1) return Math.abs(speed) > 0.4 ? 1e6 : 0.15;
   const a = (net / Math.max(5, mEff)) * 0.85;
   return (speed * speed) / (2 * a) + 0.3;
 }
