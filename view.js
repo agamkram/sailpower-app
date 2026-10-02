@@ -1,6 +1,6 @@
 /** Side view of the machine. Face-on sail is the thin plate. Edge-on sail faces the camera. */
 
-import { stroke } from "./sim.js?v=99";
+import { stroke } from "./sim.js?v=100";
 
 function sub(a, b) {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -753,8 +753,6 @@ export function draw(canvas, st) {
     paintGrain(ctx, dot);
   }
   ctx.restore();
-
-  windArrow(ctx, cam);
 }
 
 /** One filled pixel. A circle has to be approximated; a square is one rectangle. */
@@ -763,54 +761,4 @@ function paintGrain(ctx, dot) {
   ctx.fillRect(dot.q.x - 0.5, dot.q.y - 0.5, 1, 1);
 }
 
-/**
- * The wind blows along world +x, so the badge has to turn with the camera.
- * When it points nearly at or away from the viewer there is no direction left
- * to draw, and the conventional dot-in-circle or cross-in-circle says it.
- */
-function windArrow(ctx, cam) {
-  const ink = "rgba(232,237,244,0.78)";
-  const dir = [1, 0, 0];
-  const sx = dot(dir, cam.xaxis);
-  const sy = -dot(dir, cam.yaxis);
-  const toward = -dot(dir, cam.zaxis);
-  const flat = Math.hypot(sx, sy);
 
-  ctx.save();
-  ctx.fillStyle = ink;
-  ctx.strokeStyle = ink;
-  ctx.lineWidth = 1.5;
-  ctx.font = "600 12px 'DM Sans', system-ui, sans-serif";
-  ctx.textBaseline = "middle";
-  ctx.fillText("wind", 14, 20);
-
-  ctx.translate(78, 20);
-  if (flat < 0.18) {
-    ctx.beginPath();
-    ctx.arc(0, 0, 6, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.beginPath();
-    if (toward > 0) {
-      ctx.moveTo(-4, -4);
-      ctx.lineTo(4, 4);
-      ctx.moveTo(4, -4);
-      ctx.lineTo(-4, 4);
-      ctx.stroke();
-    } else {
-      ctx.arc(0, 0, 2, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  } else {
-    const half = 19 * flat;
-    ctx.rotate(Math.atan2(sy, sx));
-    ctx.beginPath();
-    ctx.moveTo(-half, 0);
-    ctx.lineTo(half, 0);
-    ctx.moveTo(half, 0);
-    ctx.lineTo(half - 5, -4);
-    ctx.moveTo(half, 0);
-    ctx.lineTo(half - 5, 4);
-    ctx.stroke();
-  }
-  ctx.restore();
-}
