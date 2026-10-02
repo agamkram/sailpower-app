@@ -234,9 +234,23 @@ function canHold(s, fa, fr) {
  * so a slew lead longer than the brake can reach back into the cruise.
  */
 function timeToRest(remaining, speed, brake) {
-  if (speed <= 0.05) return 0;
   const r = Math.max(0, remaining);
+  // A standing cart is either already there or has not set off yet. Reading
+  // both as "no time left" started the turn the instant each stroke launched,
+  // which put a stray nudge on the sail at one cap and left the real turn to
+  // happen late at the other.
+  if (r <= 0.08) return 0;
+  if (speed <= 0.05) return Infinity;
   return (r + Math.min(r, brake)) / speed;
+}
+
+/**
+ * Closing speed for the last stretch into a cap. Braking only promises to stop
+ * the cart, and in strong wind it stops it short; without this the cart parks
+ * a metre out with nothing commanding it the rest of the way in.
+ */
+function creep(gap) {
+  return Math.min(0.5, Math.max(0, gap - 0.02) * 3);
 }
 
 /** Bank one cycle and start the next. Returns the phase to run from. */
@@ -274,14 +288,19 @@ function sub(st, dt) {
   if (phase === "out" && st.vx >= 0 && hi - st.x <= brake) phase = "brakeOut";
   else if (phase === "back" && st.vx <= 0 && st.x - lo <= brake) phase = "brakeBack";
 
+  // The sail is commanded, not committed. Within `lead` of arriving it drives
+  // toward the angle that stroke ends on; outside that it drives back to the
+  // angle the stroke runs at. A one-way turn let a sail that opened too early
+  // keep opening while the wind drove the cart backwards, until it sat pinned
+  // against the far cap half open with nothing left to try.
+  const drive = (to) =>
+    to > st.alpha
+      ? Math.min(to, st.alpha + turnRate * dt)
+      : Math.max(to, st.alpha - turnRate * dt);
   if (phase === "out" || phase === "brakeOut") {
-    if (timeToRest(hi - st.x, st.vx, brake) <= lead) {
-      st.alpha = Math.min(Math.PI / 2, st.alpha + turnRate * dt);
-    }
+    st.alpha = drive(timeToRest(hi - st.x, st.vx, brake) <= lead ? Math.PI / 2 : 0);
   } else if (phase === "back" || phase === "brakeBack") {
-    if (timeToRest(st.x - lo, -st.vx, brake) <= lead) {
-      st.alpha = Math.max(0, st.alpha - turnRate * dt);
-    }
+    st.alpha = drive(timeToRest(st.x - lo, -st.vx, brake) <= lead ? 0 : Math.PI / 2);
   } else if (phase === "turnEdge") {
     st.alpha = Math.min(Math.PI / 2, st.alpha + turnRate * dt);
   } else if (phase === "turnFace") {
@@ -343,11 +362,11 @@ function sub(st, dt) {
     if (phase === "out") aDes = 4 * (vOut - st.vx);
     else if (phase === "back") aDes = 4 * (-Math.abs(s.vReturn) - st.vx);
     else if (phase === "brakeOut" || phase === "turnEdge") {
-      const dist = Math.max(0.12, hi - st.x);
-      aDes = st.vx > 0.05 ? -(st.vx * st.vx) / (2 * dist) : 4 * (0 - st.vx);
+      const gap = hi - st.x;
+      aDes = st.vx > 0.05 ? -(st.vx * st.vx) / (2 * Math.max(0.12, gap)) : 4 * (creep(gap) - st.vx);
     } else {
-      const dist = Math.max(0.12, st.x - lo);
-      aDes = st.vx < -0.05 ? (st.vx * st.vx) / (2 * dist) : 4 * (0 - st.vx);
+      const gap = st.x - lo;
+      aDes = st.vx < -0.05 ? (st.vx * st.vx) / (2 * Math.max(0.12, gap)) : 4 * (-creep(gap) - st.vx);
     }
     const up = st.vx >= 0 ? forceLimit(s, st.vx, true) : forceLimit(s, st.vx, false);
     const dn = st.vx >= 0 ? forceLimit(s, st.vx, false) : forceLimit(s, st.vx, true);
