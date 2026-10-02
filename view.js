@@ -1,6 +1,6 @@
 /** Side view of the machine. Face-on sail is the thin plate. Edge-on sail faces the camera. */
 
-import { stroke } from "./sim.js?v=81";
+import { stroke } from "./sim.js?v=82";
 
 function sub(a, b) {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -254,11 +254,10 @@ export function draw(canvas, st) {
     // rides on it, rather than being painted over the top of everything.
     polys.push({ proj, color, z: z / proj.length + layer * 0.02, layer });
   }
-  function ring(c, axis, r, off, spin) {
-    const N = 10;
+  function ring(c, axis, r, off, spin, n = 10) {
     const pts = [];
-    for (let i = 0; i < N; i++) {
-      const a = (i / N) * Math.PI * 2 + spin;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + spin;
       const cs = Math.cos(a) * r;
       const sn = Math.sin(a) * r;
       if (axis === "z") pts.push([c[0] + cs, c[1] + sn, c[2] + off]);
@@ -267,7 +266,25 @@ export function draw(canvas, st) {
     }
     return pts;
   }
-  function wheel(c, axis, r, width, color, spin = 0, spokes = false, open = false, layer = 0) {
+  // Outward normal of a quad wound like the tube facets. Used to drop the
+  // back of a rail: that skin shares the front's depth, so as the camera
+  // pans it paints over the outside and the joint reads as a moving line.
+  function facing(quad) {
+    const ax = quad[1][0] - quad[0][0];
+    const ay = quad[1][1] - quad[0][1];
+    const az = quad[1][2] - quad[0][2];
+    const bx = quad[2][0] - quad[0][0];
+    const by = quad[2][1] - quad[0][1];
+    const bz = quad[2][2] - quad[0][2];
+    const nx = ay * bz - az * by;
+    const ny = az * bx - ax * bz;
+    const nz = ax * by - ay * bx;
+    const ex = cam.eye[0] - quad[0][0];
+    const ey = cam.eye[1] - quad[0][1];
+    const ez = cam.eye[2] - quad[0][2];
+    return nx * ex + ny * ey + nz * ez > 0;
+  }
+  function wheel(c, axis, r, width, color, spin = 0, spokes = false, open = false, layer = 0, cull = false) {
     const N = 10;
     const rings = [-width / 2, width / 2].map((off) => ring(c, axis, r, off, spin));
     if (!open) {
@@ -276,7 +293,9 @@ export function draw(canvas, st) {
     }
     for (let i = 0; i < N; i++) {
       const j = (i + 1) % N;
-      add([rings[0][i], rings[0][j], rings[1][j], rings[1][i]], shade(color, 0.9), layer);
+      const quad = [rings[0][i], rings[0][j], rings[1][j], rings[1][i]];
+      if (cull && !facing(quad)) continue;
+      add(quad, shade(color, 0.9), layer);
     }
     if (!spokes) return;
     for (let k = 0; k < 3; k++) {
@@ -359,34 +378,24 @@ export function draw(canvas, st) {
     }
   }
 
-  // Segments are cut on a fixed world pitch and butted, not overlapped.
-  // Overlapping skins tied to the camera window z-fought, and the joint
-  // walked the length of the rail as a line through the stator.
   const rail0 = Math.max(cap0, x0);
   const rail1 = Math.min(cap1, x1);
-  function tube(y, z, r, color, from, to) {
-    const seg = 0.5;
-    if (to - from < 0.04) return;
-    for (let x = Math.floor(from / seg) * seg; x < to; x += seg) {
-      const a0 = Math.max(from, x);
-      const a1 = Math.min(to, x + seg);
-      if (a1 - a0 < 0.04) continue;
-      wheel([(a0 + a1) / 2, y, z], "x", r, a1 - a0, color, 0, false, true, 2);
-    }
-  }
-  for (const z of [-gauge / 2, gauge / 2]) tube(railY, z, railR, RAIL, rail0, rail1);
 
   const rungPitch = 0.4;
   for (let x = Math.ceil(rail0 / rungPitch) * rungPitch; x < rail1; x += rungPitch) {
     if (x < cap0 + 0.05 || x > cap1 - 0.05) continue;
     if (Math.abs(x - bx) < 0.36) continue;
-    wheel([x, railY - 0.012, 0], "z", 0.02, gauge - railR * 2 - 0.02, RUNG, 0, false, true, 2);
+    wheel([x, railY - 0.012, 0], "z", 0.02, gauge - railR * 2 - 0.02, RUNG, 0, false, true, 2, true);
   }
 
   if (x0 < cap0 + 0.45) box(cap0, railY + 0.1, 0, 0.07, 0.32, gauge + 0.16, 0, STOP);
   if (x1 > cap1 - 0.45) box(cap1, railY + 0.1, 0, 0.07, 0.32, gauge + 0.16, 0, STOP);
 
-  tube(railY, 0, 0.026, 0xc5d2df, rail0, rail1);
+  const rails = [
+    { y: railY, z: -gauge / 2, r: railR, color: RAIL },
+    { y: railY, z: gauge / 2, r: railR, color: RAIL },
+    { y: railY, z: 0, r: 0.026, color: 0xc5d2df },
+  ];
 
   const topR = 0.058;
   const sideR = 0.032;
@@ -493,6 +502,60 @@ export function draw(canvas, st) {
     box(bx, py1 - 0.018, 0, 0.056, 0.036, s.plateW, yaw, PLATE_EDGE);
     box(bx, py0 + 0.018, 0, 0.056, 0.036, s.plateW, yaw, PLATE_EDGE);
   }
+
+  // One outline per rail. A tube built from facets has a joint every piece
+  // and a flat on every side, and both of those move when the camera does.
+  function strokeRail(y, z, r, color, from, to) {
+    const step = 0.2;
+    const pts = [];
+    for (let x = from; x <= to + 1e-4; x += step) {
+      const at = Math.min(x, to);
+      const c = project([at, y, z]);
+      const up = project([at, y + r, z]);
+      if (!c || !up) continue;
+      pts.push({
+        x: c.x,
+        y: c.y,
+        rad: Math.max(0.6, Math.hypot(up.x - c.x, up.y - c.y)),
+      });
+    }
+    if (pts.length < 2) return;
+    const left = [];
+    const right = [];
+    let px = 0;
+    let py = -1;
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[Math.max(0, i - 1)];
+      const b = pts[Math.min(pts.length - 1, i + 1)];
+      let tx = b.x - a.x;
+      let ty = b.y - a.y;
+      const len = Math.hypot(tx, ty) || 1;
+      tx /= len;
+      ty /= len;
+      let qx = -ty;
+      let qy = tx;
+      if (qx * px + qy * py < 0) {
+        qx = -qx;
+        qy = -qy;
+      }
+      px = qx;
+      py = qy;
+      const s = pts[i];
+      left.push([s.x + qx * s.rad, s.y + qy * s.rad]);
+      right.push([s.x - qx * s.rad, s.y - qy * s.rad]);
+    }
+    ctx.beginPath();
+    ctx.moveTo(left[0][0], left[0][1]);
+    for (let i = 1; i < left.length; i++) ctx.lineTo(left[i][0], left[i][1]);
+    for (let i = right.length - 1; i >= 0; i--) ctx.lineTo(right[i][0], right[i][1]);
+    ctx.closePath();
+    ctx.fillStyle = hex(color);
+    ctx.fill();
+  }
+
+  // Far rail first, then the meshes, so the cart and the coils cover the bar.
+  rails.sort((a, b) => depthOf([bx, b.y, b.z]) - depthOf([bx, a.y, a.z]));
+  for (const rail of rails) strokeRail(rail.y, rail.z, rail.r, rail.color, rail0, rail1);
 
   polys.sort((a, b) => b.z - a.z || b.layer - a.layer);
   for (const poly of polys) {
