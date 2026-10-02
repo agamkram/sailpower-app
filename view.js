@@ -1,6 +1,6 @@
 /** Side view of the machine. Face-on sail is the thin plate. Edge-on sail faces the camera. */
 
-import { stroke } from "./sim.js?v=95";
+import { stroke } from "./sim.js?v=96";
 
 function sub(a, b) {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -656,8 +656,8 @@ export function draw(canvas, st) {
     ctx.fill();
   }
 
-  // Many small grains, each a few pixels along its motion. A round mote
-  // reads as snow. A metre-long dash reads as a stick. Neither is the air.
+  // Filled circles, one pixel across. A thicker stroke was growing the
+  // mark along the wind because the round ends stick out past the line.
   {
     const dt = windDt(st);
     const speed = Math.max(0, s.wind);
@@ -714,16 +714,10 @@ export function draw(canvas, st) {
       }
       const q = project([p.x, p.y, p.z]);
       if (!q || q.z < 0.4) continue;
-      const back = project([
-        p.x - (speed + p.ox) * 0.003,
-        p.y - p.oy * 0.003,
-        p.z - p.oz * 0.003,
-      ]);
-      windDraw.push({ p, q, back, z: q.z });
+      windDraw.push({ p, q, z: q.z });
     }
     ctx.save();
-    ctx.strokeStyle = "rgb(214, 230, 240)";
-    ctx.lineCap = "round";
+    ctx.fillStyle = "rgb(214, 230, 240)";
     for (const dot of windDraw) {
       if (dot.z < depthOf([bx, midY, 0]) - 0.05) continue;
       paintGrain(ctx, dot);
@@ -747,8 +741,7 @@ export function draw(canvas, st) {
 
   // Grains that have spilled past the plate and sit closer than it.
   ctx.save();
-  ctx.strokeStyle = "rgb(214, 230, 240)";
-  ctx.lineCap = "round";
+  ctx.fillStyle = "rgb(214, 230, 240)";
   const sailDepth = depthOf([bx, midY, 0]);
   const wc = Math.cos(yaw);
   const ws = Math.sin(yaw);
@@ -765,22 +758,12 @@ export function draw(canvas, st) {
   windArrow(ctx, cam);
 }
 
-/** A grain a couple of pixels wide, at most a few long, along its motion. */
+/** A round grain. A stroke with round ends grows longer when the pen gets thicker. */
 function paintGrain(ctx, dot) {
-  const a = dot.q;
-  const b = dot.back || a;
-  let dx = b.x - a.x;
-  let dy = b.y - a.y;
-  const len = Math.hypot(dx, dy) || 1;
-  const reach = Math.min(len, 0.4);
-  const x2 = a.x + (dx / len) * reach;
-  const y2 = a.y + (dy / len) * reach;
   ctx.globalAlpha = dot.p.a * Math.min(1, 14 / dot.z);
-  ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(a.x, a.y);
-  ctx.lineTo(x2, y2);
-  ctx.stroke();
+  ctx.arc(dot.q.x, dot.q.y, 0.5, 0, Math.PI * 2);
+  ctx.fill();
 }
 
 /**
