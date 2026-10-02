@@ -1,6 +1,6 @@
 /** Side view of the machine. Face-on sail is the thin plate. Edge-on sail faces the camera. */
 
-import { stroke } from "./sim.js?v=89";
+import { stroke } from "./sim.js?v=90";
 
 function sub(a, b) {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -81,8 +81,7 @@ function reseedWind(p, origin, sailTop, atSail) {
   p.ox = 0;
   p.oy = 0;
   p.oz = 0;
-  p.r = 0.7 + Math.random() * 1.5;
-  p.a = 0.28 + Math.random() * 0.5;
+  p.a = 0.35 + Math.random() * 0.4;
   p.x = origin - 4 - Math.random() * 9;
   if (atSail) {
     p.y = 0.7 + Math.random() * Math.max(0.5, sailTop - 0.4);
@@ -657,15 +656,15 @@ export function draw(canvas, st) {
     ctx.fill();
   }
 
-  // Particles, not dashes. They ride the free stream and sailWash
-  // pushes the ones aimed at the plate out to an edge.
+  // Many small grains, each a few pixels along its motion. A round mote
+  // reads as snow. A metre-long dash reads as a stick. Neither is the air.
   {
     const dt = windDt(st);
     const speed = Math.max(0, s.wind);
     const sailAir = py1;
-    const count = 110 + Math.round(speed * 4);
+    const count = 260 + Math.round(speed * 6);
     while (windParts.length < count) {
-      const p = { x: 0, y: 0, z: 0, ox: 0, oy: 0, oz: 0, r: 1.2, a: 0.5 };
+      const p = { x: 0, y: 0, z: 0, ox: 0, oy: 0, oz: 0, a: 0.5 };
       reseedWind(p, followX, sailAir, windParts.length % 2 === 0);
       p.x = followX + (Math.random() - 0.55) * 20;
       windParts.push(p);
@@ -715,17 +714,19 @@ export function draw(canvas, st) {
       }
       const q = project([p.x, p.y, p.z]);
       if (!q || q.z < 0.4) continue;
-      windDraw.push({ p, q, z: q.z });
+      const back = project([
+        p.x - (speed + p.ox) * 0.04,
+        p.y - p.oy * 0.04,
+        p.z - p.oz * 0.04,
+      ]);
+      windDraw.push({ p, q, back, z: q.z });
     }
     ctx.save();
-    ctx.fillStyle = "rgb(214, 230, 240)";
+    ctx.strokeStyle = "rgb(214, 230, 240)";
+    ctx.lineCap = "round";
     for (const dot of windDraw) {
       if (dot.z < depthOf([bx, midY, 0]) - 0.05) continue;
-      const rad = Math.max(0.7, dot.p.r * (10 / dot.z));
-      ctx.globalAlpha = dot.p.a * Math.min(1, 13 / dot.z);
-      ctx.beginPath();
-      ctx.arc(dot.q.x, dot.q.y, rad, 0, Math.PI * 2);
-      ctx.fill();
+      paintGrain(ctx, dot);
     }
     ctx.restore();
   }
@@ -744,9 +745,10 @@ export function draw(canvas, st) {
     ctx.fill();
   }
 
-  // Motes that have spilled past the plate and sit closer than it.
+  // Grains that have spilled past the plate and sit closer than it.
   ctx.save();
-  ctx.fillStyle = "rgb(214, 230, 240)";
+  ctx.strokeStyle = "rgb(214, 230, 240)";
+  ctx.lineCap = "round";
   const sailDepth = depthOf([bx, midY, 0]);
   const wc = Math.cos(yaw);
   const ws = Math.sin(yaw);
@@ -756,15 +758,29 @@ export function draw(canvas, st) {
     const ly = p.y - midY;
     const lz = -(p.x - bx) * ws + p.z * wc;
     if (Math.abs(ly) < s.plateH / 2 && Math.abs(lz) < s.plateW / 2) continue;
-    const rad = Math.max(0.7, p.r * (10 / dot.z));
-    ctx.globalAlpha = Math.min(0.85, p.a + 0.15) * Math.min(1, 12 / dot.z);
-    ctx.beginPath();
-    ctx.arc(dot.q.x, dot.q.y, rad, 0, Math.PI * 2);
-    ctx.fill();
+    paintGrain(ctx, dot);
   }
   ctx.restore();
 
   windArrow(ctx, cam);
+}
+
+/** A grain a couple of pixels wide, at most a few long, along its motion. */
+function paintGrain(ctx, dot) {
+  const a = dot.q;
+  const b = dot.back || a;
+  let dx = b.x - a.x;
+  let dy = b.y - a.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const reach = Math.min(len, 6);
+  const x2 = a.x + (dx / len) * reach;
+  const y2 = a.y + (dy / len) * reach;
+  ctx.globalAlpha = dot.p.a * Math.min(1, 14 / dot.z);
+  ctx.lineWidth = 1.15;
+  ctx.beginPath();
+  ctx.moveTo(a.x, a.y);
+  ctx.lineTo(x2, y2);
+  ctx.stroke();
 }
 
 /**
