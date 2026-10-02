@@ -1,6 +1,6 @@
 /** Side view of the machine. Face-on sail is the thin plate. Edge-on sail faces the camera. */
 
-import { stroke } from "./sim.js?v=103";
+import { stroke } from "./sim.js?v=104";
 
 function sub(a, b) {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -661,7 +661,7 @@ export function draw(canvas, st) {
     const dt = windDt(st);
     const speed = Math.max(0, s.wind);
     const sailAir = py1;
-    const count = 520 + Math.round(speed * 12);
+    const count = 1040 + Math.round(speed * 24);
     while (windParts.length < count) {
       const p = { x: 0, y: 0, z: 0, ox: 0, oy: 0, oz: 0, a: 0.5 };
       reseedWind(p, followX, sailAir, windParts.length % 2 === 0);
@@ -713,7 +713,12 @@ export function draw(canvas, st) {
       }
       const q = project([p.x, p.y, p.z]);
       if (!q || q.z < 0.4) continue;
-      windDraw.push({ p, q, z: q.z });
+      const back = project([
+        p.x - (speed + p.ox) * 0.01,
+        p.y - p.oy * 0.01,
+        p.z - p.oz * 0.01,
+      ]);
+      windDraw.push({ p, q, back, z: q.z });
     }
     ctx.save();
     ctx.fillStyle = "rgb(214, 230, 240)";
@@ -755,10 +760,26 @@ export function draw(canvas, st) {
   ctx.restore();
 }
 
-/** One filled pixel. A circle has to be approximated; a square is one rectangle. */
+/** Half a pixel along the motion, one pixel across. A square was as long as it was thick. */
 function paintGrain(ctx, dot) {
+  const a = dot.q;
+  const b = dot.back || a;
+  let dx = a.x - b.x;
+  let dy = a.y - b.y;
+  const len = Math.hypot(dx, dy) || 1;
+  dx /= len;
+  dy /= len;
+  const px = -dy;
+  const py = dx;
+  const al = 0.25;
+  const ac = 0.5;
   ctx.globalAlpha = dot.p.a * Math.min(1, 14 / dot.z);
-  ctx.fillRect(dot.q.x - 0.5, dot.q.y - 0.5, 1, 1);
+  ctx.beginPath();
+  ctx.moveTo(a.x + dx * al + px * ac, a.y + dy * al + py * ac);
+  ctx.lineTo(a.x + dx * al - px * ac, a.y + dy * al - py * ac);
+  ctx.lineTo(a.x - dx * al - px * ac, a.y - dy * al - py * ac);
+  ctx.lineTo(a.x - dx * al + px * ac, a.y - dy * al + py * ac);
+  ctx.fill();
 }
 
 
