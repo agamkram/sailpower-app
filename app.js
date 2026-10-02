@@ -10,8 +10,8 @@ import {
   sampleCycle,
   solvePlan,
   step,
-} from "./sim.js?v=76";
-import { draw, bindCam } from "./view.js?v=76";
+} from "./sim.js?v=77";
+import { draw, bindCam } from "./view.js?v=77";
 
 // v2: mass became chassis-only and eta became converter-only, so specs saved
 // under v1 would quietly describe a different machine.
@@ -137,7 +137,11 @@ function buildPlan() {
     btn.addEventListener("click", () => {
       specs = { ...specs, turnLead: p.turnLead };
       dropCycle();
-      if (!running) state = createState(specs);
+      // A running sim reads its own copy of the specs, so the choice has to be
+      // handed to it the same way a slider does or the chip lights up and
+      // nothing on the rail changes.
+      if (running) state.specs = specs;
+      else state = createState(specs);
       paintPlan(specs);
       if (scrub != null) applyScrub(scrub);
       else paint();
