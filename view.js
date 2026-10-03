@@ -1,6 +1,6 @@
 /** Side view of the machine. Face-on sail is the thin plate. Edge-on sail faces the camera. */
 
-import { stroke } from "./sim.js?v=116";
+import { stroke } from "./sim.js?v=117";
 
 function sub(a, b) {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -242,7 +242,60 @@ export function resetCam() {
   camCtl.pitch = CAM0.pitch;
 }
 
-function projectHome(dist, target, p, w, h) {
+/**
+ * Look-at basis, rolled so the track chord is horizontal on screen.
+ * A straight rail is a straight line in perspective, and the home camera
+ * sits off one end, so that line runs uphill. Orbiting makes it worse.
+ * World-up is kept when the view is down the track, where the chord is too
+ * short to level without tipping the horizon over.
+ */
+function viewBasis(eye, target, w, h, alongA, alongB) {
+  const zaxis = norm(sub(eye, target));
+  let right = cross([0, 1, 0], zaxis);
+  const rl = Math.hypot(right[0], right[1], right[2]);
+  if (rl < 1e-4) right = [1, 0, 0];
+  else right = [right[0] / rl, right[1] / rl, right[2] / rl];
+  let up = cross(zaxis, right);
+  const fLen = h / 2 / Math.tan(FOV / 2);
+  const screen = (p, xa, ya) => {
+    const d = sub(p, eye);
+    const depth = -dot(d, zaxis);
+    if (depth < 0.2) return null;
+    return {
+      x: (dot(d, xa) / depth) * fLen,
+      y: -(dot(d, ya) / depth) * fLen,
+    };
+  };
+  const qa = screen(alongA, right, up);
+  const qb = screen(alongB, right, up);
+  if (qa && qb) {
+    const dx = qb.x - qa.x;
+    const dy = qb.y - qa.y;
+    const span = Math.hypot(dx, dy);
+    if (span > 8 && Math.abs(dx) > span * 0.35) {
+      let ang = Math.atan2(dy, dx);
+      if (ang > Math.PI / 2) ang -= Math.PI;
+      else if (ang < -Math.PI / 2) ang += Math.PI;
+      const c = Math.cos(ang);
+      const s = -Math.sin(ang);
+      const xa = right;
+      const ya = up;
+      right = [
+        c * xa[0] + s * ya[0],
+        c * xa[1] + s * ya[1],
+        c * xa[2] + s * ya[2],
+      ];
+      up = [
+        -s * xa[0] + c * ya[0],
+        -s * xa[1] + c * ya[1],
+        -s * xa[2] + c * ya[2],
+      ];
+    }
+  }
+  return { xaxis: right, yaxis: up, zaxis, fLen };
+}
+
+function projectHome(dist, target, p, w, h, alongA, alongB) {
   const cp = Math.cos(CAM0.pitch);
   const sp = Math.sin(CAM0.pitch);
   const cy = Math.cos(CAM0.yaw);
@@ -252,10 +305,7 @@ function projectHome(dist, target, p, w, h) {
     target[1] + dist * sp,
     target[2] + dist * cp * cy,
   ];
-  const zaxis = norm(sub(eye, target));
-  const xaxis = norm(cross([0, 1, 0], zaxis));
-  const yaxis = cross(zaxis, xaxis);
-  const fLen = h / 2 / Math.tan(FOV / 2);
+  const { xaxis, yaxis, zaxis, fLen } = viewBasis(eye, target, w, h, alongA, alongB);
   const d = sub(p, eye);
   const depth = -dot(d, zaxis);
   if (depth < 0.2) return null;
@@ -279,9 +329,11 @@ function homeDist(s, w, h, target, lo, hi, cap0, cap1, sailTop) {
   ];
   const marginX = w * 0.06;
   const marginY = h * 0.07;
+  const alongA = [cap0, 0.2, 0];
+  const alongB = [cap1, 0.2, 0];
   const covers = (dist) => {
     for (const p of pts) {
-      const q = projectHome(dist, target, p, w, h);
+      const q = projectHome(dist, target, p, w, h, alongA, alongB);
       if (!q) return false;
       if (q.x < marginX || q.x > w - marginX || q.y < marginY || q.y > h - marginY) return false;
     }
@@ -450,11 +502,16 @@ export function draw(canvas, st) {
     target[1] + camCtl.dist * sp,
     target[2] + camCtl.dist * cp * cy,
   ];
-  const zaxis = norm(sub(eye, target));
-  const xaxis = norm(cross([0, 1, 0], zaxis));
-  const yaxis = cross(zaxis, xaxis);
-  const fLen = h / 2 / Math.tan(FOV / 2);
-  const cam = { eye, xaxis, yaxis, zaxis, fLen, w, h };
+  const level = viewBasis(eye, target, w, h, [cap0, 0.2, 0], [cap1, 0.2, 0]);
+  const cam = {
+    eye,
+    xaxis: level.xaxis,
+    yaxis: level.yaxis,
+    zaxis: level.zaxis,
+    fLen: level.fLen,
+    w,
+    h,
+  };
 
   const polys = [];
   function depthOf(p) {
