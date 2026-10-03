@@ -282,6 +282,7 @@ function creep(gap) {
 
 /** Bank one cycle and start the next. Returns the phase to run from. */
 function closeCycle(st) {
+  st.alpha = 0;
   st.cycles += 1;
   st.lastCycleS = st.cycleT;
   st.cycleT = 0;
@@ -447,27 +448,23 @@ function sub(st, dt) {
   if ((phase === "brakeOut" || phase === "turnEdge") && parked && st.x > hi - 0.08) {
     st.vx = 0;
     st.x = hi;
-    // Leave for home once the sail is close enough to edge-on that the return
-    // motor still beats the wind. The last of the turn finishes on the move.
-    // In a gale that is only the last few degrees; in a lighter wind it is earlier.
-    const pushBack = Math.abs(aeroForce(s, 0, st.alpha));
-    const canBeat = pushBack < forceLimit(s, 0, true) * 0.35;
-    if (st.alpha >= Math.PI / 2 - 0.05 || (st.alpha > 1 && canBeat)) {
-      if (st.alpha > Math.PI / 2) st.alpha = Math.PI / 2;
+    // The return starts when the face load has fallen into the edge load.
+    // That is a few degrees from edge-on at every wind. Leaving sooner is the
+    // motor pushing against a plate, which is not this machine.
+    if (st.alpha >= Math.PI / 2 - 0.05) {
+      st.alpha = Math.PI / 2;
       phase = "back";
     } else phase = "turnEdge";
   } else if ((phase === "brakeBack" || phase === "turnFace") && parked && st.x < lo + 0.08) {
     st.vx = 0;
     st.x = lo;
-    // 18° short of face-on. Waiting out that last slice costs more, in lost
-    // generating time, than the push it would have added.
-    if (st.alpha <= 18 * Math.PI / 180) phase = closeCycle(st);
+    if (st.alpha <= 0.05) phase = closeCycle(st);
     else phase = "turnFace";
   }
   // A strong wind pulls the cart off the home cap before the sail is all the
   // way round. That is the power stroke starting early, not a stall, so the
   // cycle turns over on sail angle rather than on sitting still at the cap.
-  if (phase === "turnFace" && st.alpha <= 18 * Math.PI / 180) phase = closeCycle(st);
+  if (phase === "turnFace" && st.alpha <= 0.05) phase = closeCycle(st);
 
   const mech = -fCmd * st.vx;
   let inst = 0;
