@@ -1,6 +1,6 @@
 /** Side view of the machine. Face-on sail is the thin plate. Edge-on sail faces the camera. */
 
-import { stroke } from "./sim.js?v=110";
+import { stroke } from "./sim.js?v=111";
 
 function sub(a, b) {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -51,11 +51,10 @@ const STOP = 0x6e1218;
 
 let followX = null;
 
-// Free-stream markers. The model’s wind is a uniform flow along +x. Near the
-// sail the same plate the force model uses splits that flow: face-on, air is
-// pushed to the nearest edge and a slow wide trail follows; edge-on, the plate
-// blocks nothing. While the sim is running they share its clock, including the
-// rate button. While it is paused they keep drifting on the wall clock.
+// Free-stream markers. The model’s wind is a uniform flow along +x, not a
+// solved field, so these move at that speed and nothing else. While the sim
+// is running they share its clock, including the rate button. While it is
+// paused they keep drifting on the wall clock so the slider still shows.
 const windParts = [];
 const windDraw = [];
 let windWall = 0;
@@ -96,8 +95,9 @@ function reseedWind(p, xLo, xHi, sailTop, atSail) {
 /**
  * Extra velocity so the free stream does not pass through the plate.
  * Face-on, air headed at the sail is pushed to the nearest edge and a
- * slow trail follows, wide and long the way a flat plate's wake is.
- * Edge-on, the plate blocks nothing. Same plate the force model uses.
+ * slower wake trails behind. Edge-on, the plate blocks nothing and the
+ * extra velocity is zero. This is the same plate the force model uses,
+ * drawn as a kinematic split, not a solved flow field.
  */
 function sailWash(p, sail) {
   const c = Math.cos(sail.yaw);
@@ -128,22 +128,12 @@ function sailWash(p, sail) {
     else vzL = (lz < 0 ? -1 : 1) * push;
     slow = block * near * Math.max(0, 1 - cover) * Math.abs(U) * 0.75;
   }
-  // The first trail died within about one sail-height and also flung air
-  // outward. A flat plate's shadow stays slow and a bit wider than the plate
-  // for several heights. No swirl: that read as fluff.
   const down = -upstream;
-  const height = 2 * Math.max(sail.halfH, sail.halfW);
-  const wakeLen = 2.6 * height;
-  if (down > 0 && down < wakeLen) {
-    const fade = (1 - down / wakeLen) ** 1.15;
-    const spread = 1.02 + 0.45 * (down / height);
-    if (cover < spread) {
-      const inside = Math.max(0, 1 - cover / spread);
-      slow += block * fade * inside * Math.abs(U) * 0.72;
-      const widen = block * fade * Math.abs(U) * 0.05;
-      vy += (ly < 0 ? -1 : 1) * widen;
-      vzL += (lz < 0 ? -1 : 1) * widen;
-    }
+  if (down > 0 && down < reach * 1.5 && cover < 1.05) {
+    const fade = Math.max(0, 1 - down / (reach * 1.5));
+    slow += block * fade * Math.abs(U) * 0.6;
+    vy += (ly < 0 ? -1 : 1) * block * fade * Math.abs(U) * 0.18;
+    vzL += (lz < 0 ? -1 : 1) * block * fade * Math.abs(U) * 0.18;
   }
   const flow = Math.sign(U) || 1;
   return [-slow * flow - vzL * s, vy, vzL * c];
