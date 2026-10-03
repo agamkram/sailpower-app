@@ -4,14 +4,12 @@ import {
   defaultSpecs,
   fitError,
   netOf,
-  phaseLabel,
-  planInfo,
   rig,
   sampleCycle,
   solvePlan,
   step,
-} from "./sim.js?v=123";
-import { draw, bindCam } from "./view.js?v=123";
+} from "./sim.js?v=124";
+import { draw, bindCam } from "./view.js?v=124";
 
 // v3: the reference sail is 2.5×4 m on a 10 m track with a 0.5 s turn.
 // Saved v2 specs would put the old 5×2 m machine back on screen.
@@ -109,14 +107,6 @@ function paintForm() {
   $("o-eta").textContent = Math.round(s.eta * 100) + "%";
   $("o-crr").textContent = s.crr.toFixed(3);
   $("warn").textContent = fitError(s);
-  paintPlan(s);
-}
-
-function paintPlan(s) {
-  const p = planInfo(s);
-  $("plan-note").textContent =
-    `turn ${p.turn.toFixed(2)}s · lead ${p.lead.toFixed(2)}s · ` +
-    `brake ${p.brakeM.toFixed(1)}m · ${Math.round(p.torqueNm)} Nm`;
 }
 
 function ensureCycle() {
@@ -158,15 +148,7 @@ function ceiling(s) {
 
 function refreshSpan() {
   const c = ensureCycle();
-  const area = (specs.plateW * specs.plateH).toFixed(1) + " m²";
-  if (!c) {
-    powerScale = 1000;
-    $("scale").textContent = area;
-    return;
-  }
-  powerScale = c.span;
-  $("scale").textContent =
-    area + " · ±" + Math.round(c.span).toLocaleString("en-US") + " W";
+  powerScale = c ? c.span : 1000;
 }
 
 function scheduleSpan() {
@@ -186,14 +168,6 @@ function fmtKJ(j) {
 }
 
 function paint() {
-  const err = fitError(state.specs);
-  const live = running || scrub != null;
-  let label = live ? phaseLabel(state.phase) : err || "Ready";
-  if (live && state.feather > 0.02) {
-    label += " · feathered " + Math.round((state.feather * 180) / Math.PI) + "°";
-  }
-  if (live && state.slip) label += " · slipping";
-  $("phase").textContent = label;
   $("speed").textContent = state.vx.toFixed(1) + " m/s";
   $("watts").textContent = fmtW(state.inst);
   $("watts").style.color = state.inst >= 0 ? "var(--green)" : "var(--amber)";
@@ -201,13 +175,11 @@ function paint() {
   const dur = cycle ? cycle.seconds : state.lastCycleS;
   if (scrub != null) {
     $("net").textContent = (scrub * dur).toFixed(2) + " s";
-    $("substat").textContent = dur > 0 ? "of a " + dur.toFixed(1) + " s cycle" : "no cycle";
+    $("substat").textContent = "";
   } else {
     $("net").textContent = "net " + fmtKJ(net);
     const avg = avgWatts(state);
-    $("substat").textContent =
-      state.cycles + (state.cycles === 1 ? " cycle" : " cycles") +
-      (avg == null ? "" : " · " + Math.round(avg) + " W avg");
+    $("substat").textContent = avg == null ? "" : Math.round(avg) + " W avg";
   }
   const span = powerScale;
   const pct = Math.max(-50, Math.min(50, (state.inst / span) * 50));

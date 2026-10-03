@@ -183,11 +183,25 @@ header h1 {
   transform: scale(1.18);
 }
 
-.meters {
+.deck {
   flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 0.5rem;
+  align-items: end;
+  padding-bottom: max(0.35rem, var(--safe-b));
+}
+
+.deck-main {
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 0.28rem;
+}
+
+.deck-aside {
+  min-width: 0;
+  min-height: 1px;
 }
 
 .phase-row, .net-row, .actions {
@@ -195,14 +209,6 @@ header h1 {
   align-items: center;
   justify-content: space-between;
   gap: 0.4rem;
-}
-
-.phase {
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--muted);
 }
 
 .speed {
@@ -245,38 +251,12 @@ header h1 {
   font-weight: 600;
 }
 
-.watts { font-size: 1.05rem; min-width: 6.2rem; text-align: right; }
-.scale {
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
-  font-variant-numeric: tabular-nums;
-  font-size: 0.56rem;
-  line-height: 1.15;
-  color: var(--muted);
-  text-align: right;
-  white-space: nowrap;
-}
+.watts { font-size: 1.05rem; min-width: 5.4rem; text-align: right; }
 .net { font-size: 0.78rem; color: var(--text); }
 .substat { font-size: 0.68rem; color: var(--muted); }
 
-.plan {
-  flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-}
-
-.plan-note {
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
-  font-size: 0.56rem;
-  letter-spacing: -0.01em;
-  color: var(--muted);
-  min-height: 1em;
-  line-height: 1.25;
-}
-
 .actions {
   flex: 0 0 auto;
-  padding-bottom: max(0.35rem, var(--safe-b));
 }
 
 button, .btn {
@@ -363,5 +343,7 @@ label.field output {
 .warn {
   color: var(--amber);
   font-size: 0.72rem;
-  min-height: 1em;
+  min-height: 0;
 }
+
+.warn:empty { display: none; }

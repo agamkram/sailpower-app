@@ -86,7 +86,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=IBM+Plex+Mono:wght@500;600&family=Michroma&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=123" />
+  <link rel="stylesheet" href="styles.css?v=124" />
 </head>
 <body>
   <div class="fit-stage" id="fit-stage">
@@ -104,35 +104,29 @@
         </div>
       </div>
 
-      <section class="meters" aria-live="polite">
-        <div class="phase-row">
-          <span class="phase" id="phase">Ready</span>
-          <span class="speed" id="speed">0.0 m/s</span>
-        </div>
-        <div class="phase-row">
-          <div class="pbar" id="pbar" aria-hidden="true">
-            <div class="pbar-zero"></div>
-            <div class="pbar-fill" id="pfill"></div>
+      <section class="deck">
+        <div class="deck-main" aria-live="polite">
+          <div class="phase-row">
+            <span class="speed" id="speed">0.0 m/s</span>
+            <div class="pbar" id="pbar" aria-hidden="true">
+              <div class="pbar-zero"></div>
+              <div class="pbar-fill" id="pfill"></div>
+            </div>
+            <span class="watts" id="watts">0 W</span>
           </div>
-          <span class="watts" id="watts">0 W</span>
+          <div class="net-row">
+            <span class="net" id="net">net 0.00 kJ</span>
+            <span class="substat" id="substat"></span>
+          </div>
+          <p class="warn" id="warn"></p>
+          <div class="actions">
+            <button type="button" class="go" id="run">Run</button>
+            <button type="button" id="specs-btn">Specs</button>
+            <button type="button" id="rate">1×</button>
+          </div>
         </div>
-        <p class="scale" id="scale"></p>
-        <div class="net-row">
-          <span class="net" id="net">net 0.00 kJ</span>
-          <span class="substat" id="substat">0 cycles</span>
-        </div>
-        <p class="warn" id="warn"></p>
+        <div class="deck-aside"></div>
       </section>
-
-      <section class="plan" aria-label="Rotation plan">
-        <p class="plan-note" id="plan-note"></p>
-      </section>
-
-      <div class="actions">
-        <button type="button" class="go" id="run">Run</button>
-        <button type="button" id="specs-btn">Specs</button>
-        <button type="button" id="rate">1×</button>
-      </div>
 
       <form class="sheet" id="sheet" hidden>
         <div class="sheet-head">
@@ -183,6 +177,6 @@
       </form>
     </div>
   </div>
-  <script type="module" src="app.js?v=123"></script>
+  <script type="module" src="app.js?v=124"></script>
 </body>
 </html>
