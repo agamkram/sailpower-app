@@ -1,6 +1,6 @@
 /** Side view of the machine. Face-on sail is the thin plate. Edge-on sail faces the camera. */
 
-import { stroke } from "./sim.js?v=114";
+import { stroke } from "./sim.js?v=115";
 
 function sub(a, b) {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -51,14 +51,15 @@ const STOP = 0x6e1218;
 
 let followX = null;
 
-// Free-stream markers. The model’s wind is a uniform flow along +x, not a
-// solved field, so these move at that speed and nothing else. While the sim
-// is running they share its clock, including the rate button. While it is
-// paused they keep drifting on the wall clock so the slider still shows.
+// Free-stream markers. The watts do not use them. While the sim is running they
+// share its clock, including the rate button. While it is paused they keep
+// drifting on the wall clock so the slider still shows.
 const windParts = [];
+const windSmoke = [];
 const windDraw = [];
 let windWall = 0;
 let windSim = null;
+let windClock = 0;
 
 function windDt(st) {
   const now = performance.now() / 1000;
@@ -77,66 +78,165 @@ function windDt(st) {
   return wall;
 }
 
-function reseedWind(p, xLo, xHi, sailTop, atSail) {
+function reseedWind(p, xLo, xHi, sailTop, atSail, inlet) {
   p.ox = 0;
   p.oy = 0;
   p.oz = 0;
   p.a = 0.35 + Math.random() * 0.4;
-  p.x = xLo + Math.random() * Math.max(1, xHi - xLo);
-  if (atSail) {
-    p.y = 0.7 + Math.random() * Math.max(0.5, sailTop - 0.4);
-    p.z = (Math.random() - 0.5) * 4.4;
-  } else {
-    p.y = 0.4 + Math.random() * (sailTop + 1.1);
-    p.z = (Math.random() - 0.5) * 9;
-  }
+  p.y = 0.4 + Math.random() * (sailTop + 1.1);
+  p.z = (Math.random() - 0.5) * (atSail ? 4.4 : 9);
+  // Leaving the frame comes back in at the upstream edge, the way a tracer
+  // would. Scattering the replacement through the volume fed the slow wake.
+  p.x = inlet ? xLo : xLo + Math.random() * Math.max(1, xHi - xLo);
+  if (atSail) p.y = 0.7 + Math.random() * Math.max(0.5, sailTop - 0.4);
 }
 
 /**
- * Extra velocity so the free stream does not pass through the plate.
- * Face-on, air headed at the sail is pushed to the nearest edge and a
- * slower wake trails behind. Edge-on, the plate blocks nothing and the
- * extra velocity is zero. This is the same plate the force model uses,
- * drawn as a kinematic split, not a solved flow field.
+ * Picture of the air around the plate. The force model is not touched.
+ *
+ * In coordinates stretched so the plate's outline is a unit circle, each term
+ * comes from an axisymmetric stream function: a centreline gaussian for the
+ * cushion, the bubble and the wake, and a ring gaussian for the rim. The
+ * radial velocity is the one that cancels the streamwise divergence, so the
+ * grains cannot pile up where the air slows. A traveling wave in the
+ * horizontal plane, also drawn from a stream function, sheds across the width
+ * at a Strouhal number of 0.15. Edge-on, the projected width collapses and
+ * the wave is faded out, so the plate throws nothing.
  */
-function sailWash(p, sail) {
+function sailFlow(p, sail) {
+  const Um = Math.abs(sail.U);
+  if (Um < 0.15) return [0, 0, 0];
+  const face = Math.abs(Math.cos(sail.yaw));
+  const edge = Math.abs(Math.sin(sail.yaw));
+  let gate = (face - 0.1) / 0.25;
+  if (gate <= 0) return [0, 0, 0];
+  if (gate > 1) gate = 1;
+  gate = gate * gate * (3 - 2 * gate);
+  const Wp = sail.halfW * face + (sail.thick || 0.006) * 0.5 * edge;
+  if (Wp < 0.04) return [0, 0, 0];
+  const H = Math.max(0.2, sail.halfH);
+  const R0 = 2 * Wp;
+  const dir = Math.sign(sail.U) || 1;
+  const xi = ((p.x - sail.bx) * dir) / R0;
+  const Y = (p.y - sail.midY) / H;
+  const Z = p.z / Wp;
+  const rho = Math.hypot(Y, Z);
+
+  let uxi = 0;
+  let ur = 0;
+  const gauss = (M, x0, sx, sr) => {
+    const dx = xi - x0;
+    const sx2 = sx * sx;
+    const A = M * Math.exp((-0.5 * dx * dx) / sx2);
+    const Ap = (A * -dx) / sx2;
+    const sr2 = sr * sr;
+    const a = (rho * rho) / (2 * sr2);
+    const e = Math.exp(-a);
+    uxi += A * e;
+    if (rho < 1e-3) ur += -Ap * rho * 0.5;
+    else ur += -Ap * (sr2 / rho) * (1 - e);
+  };
+  const rim = (M, x0, sx, sr) => {
+    const dx = xi - x0;
+    const sx2 = sx * sx;
+    const A = M * Math.exp((-0.5 * dx * dx) / sx2);
+    const Ap = (A * -dx) / sx2;
+    const sr2 = sr * sr;
+    const a = (rho * rho) / (2 * sr2);
+    const e = Math.exp(-a);
+    uxi += A * rho * rho * e;
+    const bracket = 1 - e * (a + 1);
+    if (rho < 1e-3) ur += -Ap * rho * rho * rho * 0.25;
+    else ur += -Ap * ((2 * sr2 * sr2) / rho) * bracket;
+  };
+
+  // Fractions of the relative wind. ξ is in projected widths. The cushion is
+  // centred just behind the face, so on the plate itself the air is still
+  // spreading toward the rim rather than sitting at the stagnation line.
+  gauss(-0.55, 0.22, 0.42, 0.58);
+  rim(2.05, -0.06, 0.3, 0.707);
+  gauss(-1.7, 1.2, 0.48, 0.38);
+  gauss(-0.28, 2.6, 1.15, 0.75);
+  gauss(-0.16, 5.5, 2, 1.1);
+  gauss(-0.09, 10, 3, 1.5);
+
+  const k = (2 * Math.PI) / 5.3;
+  const L = 8;
+  const w = 0.4;
+  const sz = 0.6;
+  const sy = 0.75;
+  const eps = 0.16;
+  const freq = (0.15 * Um) / R0;
+  const ang = k * xi - 2 * Math.PI * freq * (sail.time || 0);
+  const Sig = 1 / (1 + Math.exp(-xi / w));
+  const env = Sig * Math.exp(-xi / L);
+  const envp = env * ((1 - Sig) / w - 1 / L);
+  const S = Math.sin(ang);
+  const C = Math.cos(ang);
+  const Gz = Math.exp((-0.5 * Z * Z) / (sz * sz));
+  const Gy = Math.exp((-0.5 * Y * Y) / (sy * sy));
+  const phiX = Gy * eps * S * env * Gz * (-Z / (sz * sz));
+  const phiZ = Gy * -eps * Gz * (k * C * env + S * envp);
+
+  const inv = rho < 1e-4 ? 0 : 1 / rho;
+  const scale = Um * gate;
+  const vxi = scale * (uxi + phiX);
+  const vy = scale * (H / R0) * (ur * Y * inv);
+  const vz = scale * (Wp / R0) * (ur * Z * inv + phiZ);
+  return [dir * vxi, vy, vz];
+}
+
+/**
+ * Upstream grains go around the plate, so they never enter the separated
+ * region. A few are released there, into the same field, so the reverse flow
+ * can be seen. They are put back when they leave that region.
+ */
+function smokeGeom(sail) {
+  const face = Math.abs(Math.cos(sail.yaw));
+  const edge = Math.abs(Math.sin(sail.yaw));
+  const Wp = sail.halfW * face + (sail.thick || 0.006) * 0.5 * edge;
+  const H = Math.max(0.2, sail.halfH);
+  return { face, Wp, H, R0: 2 * Wp, dir: Math.sign(sail.U) || 1 };
+}
+
+function smokeInside(p, sail) {
+  const g = smokeGeom(sail);
+  if (g.face < 0.2 || g.Wp < 0.04) return false;
+  const xi = ((p.x - sail.bx) * g.dir) / g.R0;
+  const rho = Math.hypot((p.y - sail.midY) / g.H, p.z / g.Wp);
+  return xi > 0.2 && xi < 3.4 && rho < 1.2 && p.y > 0.25;
+}
+
+function seedSmoke(p, sail) {
+  const g = smokeGeom(sail);
+  const ang = Math.random() * Math.PI * 2;
+  const rho = 0.22 + Math.random() * 0.4;
+  const xi = 0.5 + Math.random() * 0.55;
+  p.x = sail.bx + g.dir * xi * g.R0;
+  p.y = sail.midY + Math.cos(ang) * rho * g.H;
+  p.z = Math.sin(ang) * rho * g.Wp;
+  p.a = 0.45 + Math.random() * 0.4;
+}
+
+/** A step that lands inside the plate is put back on the windward face. */
+function holdOffPlate(p, sail) {
   const c = Math.cos(sail.yaw);
-  const s = Math.sin(sail.yaw);
+  if (Math.abs(c) < 0.2 || Math.abs(sail.U) < 0.15) return;
+  const sn = Math.sin(sail.yaw);
   const dx = p.x - sail.bx;
-  const lx = dx * c + p.z * s;
+  const lx = dx * c + p.z * sn;
   const ly = p.y - sail.midY;
-  const lz = -dx * s + p.z * c;
-  const block = Math.abs(c);
-  const U = sail.U;
-  if (block < 0.04 || Math.abs(U) < 0.15) return [0, 0, 0];
-  const reach = 1.15 * Math.max(sail.halfH, sail.halfW);
-  const up = Math.sign(U * c) || 1;
-  const upstream = -lx * up;
-  const ny = Math.abs(ly) / sail.halfH;
-  const nz = Math.abs(lz) / sail.halfW;
-  const cover = Math.max(ny, nz);
-  let vy = 0;
-  let vzL = 0;
-  let slow = 0;
-  if (upstream > -0.2 && upstream < reach && cover < 1.4) {
-    const near = Math.max(0, 1 - upstream / reach);
-    const spill = Math.max(0, 1.2 - cover);
-    const push = block * near * near * spill * Math.abs(U);
-    const roomY = sail.halfH - Math.abs(ly);
-    const roomZ = sail.halfW - Math.abs(lz);
-    if (roomY < roomZ) vy = (ly < 0 ? -1 : 1) * push;
-    else vzL = (lz < 0 ? -1 : 1) * push;
-    slow = block * near * Math.max(0, 1 - cover) * Math.abs(U) * 0.75;
-  }
-  const down = -upstream;
-  if (down > 0 && down < reach * 1.5 && cover < 1.05) {
-    const fade = Math.max(0, 1 - down / (reach * 1.5));
-    slow += block * fade * Math.abs(U) * 0.6;
-    vy += (ly < 0 ? -1 : 1) * block * fade * Math.abs(U) * 0.18;
-    vzL += (lz < 0 ? -1 : 1) * block * fade * Math.abs(U) * 0.18;
-  }
-  const flow = Math.sign(U) || 1;
-  return [-slow * flow - vzL * s, vy, vzL * c];
+  const lz = -dx * sn + p.z * c;
+  if (Math.abs(lx) > 0.22) return;
+  if (Math.abs(ly) >= sail.halfH || Math.abs(lz) >= sail.halfW) return;
+  // The outer band is the rim. Holding it on the face stacked grains there.
+  const ny = ly / sail.halfH;
+  const nz = lz / sail.halfW;
+  if (ny * ny + nz * nz > 0.72) return;
+  const up = Math.sign(sail.U * c) || 1;
+  const lx2 = -0.04 * up;
+  p.x = sail.bx + lx2 * c - lz * sn;
+  p.z = lx2 * sn + lz * c;
 }
 
 
@@ -741,52 +841,51 @@ export function draw(canvas, st) {
       reseedWind(p, xLo, xHi, sailAir, windParts.length % 2 === 0);
       windParts.push(p);
     }
+    windClock += dt;
     const sail = {
       bx,
       midY,
       yaw,
       halfH: s.plateH / 2,
       halfW: s.plateW / 2,
+      thick: s.thickness,
       U: speed - st.vx,
+      time: windClock,
     };
     windDraw.length = 0;
     for (let i = 0; i < count; i++) {
       const p = windParts[i];
-      const wash = sailWash(p, sail);
-      p.ox += (wash[0] - (p.ox || 0)) * 0.55;
-      p.oy += (wash[1] - (p.oy || 0)) * 0.55;
-      p.oz += (wash[2] - (p.oz || 0)) * 0.55;
+      const wash = sailFlow(p, sail);
+      p.ox = wash[0];
+      p.oy = wash[1];
+      p.oz = wash[2];
       p.x += (speed + p.ox) * dt;
       p.y += p.oy * dt;
       p.z += p.oz * dt;
-      // A step can jump the thin plate. Put that air out at the nearest edge.
-      if (Math.abs(Math.cos(yaw)) > 0.2) {
-        const c = Math.cos(yaw);
-        const sn = Math.sin(yaw);
-        const dx = p.x - bx;
-        const lx = dx * c + p.z * sn;
-        const ly = p.y - midY;
-        const lz = -dx * sn + p.z * c;
-        const hH = s.plateH / 2;
-        const hW = s.plateW / 2;
-        if (Math.abs(lx) < 0.25 && Math.abs(ly) < hH && Math.abs(lz) < hW) {
-          const up = Math.sign(sail.U * c) || 1;
-          let ly2 = ly;
-          let lz2 = lz;
-          if (hH - Math.abs(ly) < hW - Math.abs(lz)) ly2 = (ly < 0 ? -1 : 1) * (hH + 0.18);
-          else lz2 = (lz < 0 ? -1 : 1) * (hW + 0.18);
-          const lx2 = -0.06 * up;
-          p.x = bx + lx2 * c - lz2 * sn;
-          p.y = midY + ly2;
-          p.z = lx2 * sn + lz2 * c;
-        }
-      }
+      holdOffPlate(p, sail);
       if (p.x > xHi || p.x < xLo || p.y > sailAir + 2.4 || p.y < 0.15) {
-        reseedWind(p, xLo, xHi, sailAir, i % 2 === 0);
+        reseedWind(p, xLo, xHi, sailAir, false, true);
       }
       const q = project([p.x, p.y, p.z]);
       if (!q || q.z < 0.4) continue;
       windDraw.push({ p, q, z: q.z });
+    }
+    // Separated-region grains. Same field as the free stream.
+    if (Math.abs(Math.cos(yaw)) > 0.2 && Math.abs(sail.U) > 0.15) {
+      while (windSmoke.length < 48) windSmoke.push({ x: 0, y: -10, z: 0, a: 0.5, live: false });
+      for (const p of windSmoke) {
+        if (!p.live || !smokeInside(p, sail)) {
+          seedSmoke(p, sail);
+          p.live = true;
+        }
+        const wash = sailFlow(p, sail);
+        p.x += (speed + wash[0]) * dt;
+        p.y += wash[1] * dt;
+        p.z += wash[2] * dt;
+        const q = project([p.x, p.y, p.z]);
+        if (!q || q.z < 0.4) continue;
+        windDraw.push({ p, q, z: q.z });
+      }
     }
     ctx.save();
     ctx.fillStyle = "rgb(214, 230, 240)";
