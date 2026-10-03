@@ -1,4 +1,5 @@
 import {
+  avgWatts,
   createState,
   defaultSpecs,
   fitError,
@@ -9,8 +10,8 @@ import {
   sampleCycle,
   solvePlan,
   step,
-} from "./sim.js?v=113";
-import { draw, bindCam } from "./view.js?v=113";
+} from "./sim.js?v=114";
+import { draw, bindCam } from "./view.js?v=114";
 
 // v3: the reference sail is 2.5×4 m on a 10 m track with a 0.5 s turn.
 // Saved v2 specs would put the old 5×2 m machine back on screen.
@@ -203,10 +204,10 @@ function paint() {
     $("substat").textContent = dur > 0 ? "of a " + dur.toFixed(1) + " s cycle" : "no cycle";
   } else {
     $("net").textContent = "net " + fmtKJ(net);
-    const avg = state.time > 0.5 ? net / state.time : 0;
+    const avg = avgWatts(state);
     $("substat").textContent =
       state.cycles + (state.cycles === 1 ? " cycle" : " cycles") +
-      (state.time > 0.5 ? " · " + Math.round(avg) + " W avg" : "");
+      (avg == null ? "" : " · " + Math.round(avg) + " W avg");
   }
   const span = powerScale;
   const pct = Math.max(-50, Math.min(50, (state.inst / span) * 50));

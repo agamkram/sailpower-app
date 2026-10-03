@@ -187,11 +187,27 @@ export function createState(specs) {
     cycleSlew: 0,
     cycleLoss: 0,
     cycleStop: 0,
+    avgNet: 0,
+    avgT: 0,
   };
 }
 
 export function netOf(st) {
   return st.gen - st.mot - st.slew - st.loss - st.stop;
+}
+
+/**
+ * Average net power over whole cycles, or null before the first one closes.
+ *
+ * The cart starts at the home cap face-on, which is where a cycle begins, so
+ * there is no settling transient to discard: cycle one already runs at the
+ * steady figure. What does mislead is the cycle in progress. Dividing the
+ * running total by the running clock counts a part-finished cycle that has
+ * taken the power stroke and not yet paid for the trip home, and on a machine
+ * with a long cycle that reads tens of percent high.
+ */
+export function avgWatts(st) {
+  return st.avgT > 0 ? st.avgNet / st.avgT : null;
 }
 
 function clamp(v, a, b) {
@@ -287,6 +303,8 @@ function closeCycle(st) {
   st.lastCycleS = st.cycleT;
   st.cycleT = 0;
   st.lastCycleNet = st.cycleGen - st.cycleMot - st.cycleSlew - st.cycleLoss - st.cycleStop;
+  st.avgNet += st.lastCycleNet;
+  st.avgT += st.lastCycleS;
   st.cycleGen = 0;
   st.cycleMot = 0;
   st.cycleSlew = 0;
@@ -467,17 +485,14 @@ function sub(st, dt) {
   if (phase === "turnFace" && st.alpha <= 0.05) phase = closeCycle(st);
 
   const mech = -fCmd * st.vx;
-  let inst = 0;
   if (mech >= 0) {
     const e = mech * s.etaG * dt;
     st.gen += e;
     st.cycleGen += e;
-    inst = mech * s.etaG;
   } else {
     const e = (-mech / s.etaM) * dt;
     st.mot += e;
     st.cycleMot += e;
-    inst = mech / s.etaM;
   }
   // Copper scales with force squared and iron with speed squared, and both are
   // paid at every speed. The old model only charged copper while parked.
@@ -486,13 +501,10 @@ function sub(st, dt) {
   const eLoss = (cu + iron) * dt;
   st.loss += eLoss;
   st.cycleLoss += eLoss;
-  inst -= cu + iron;
-  inst -= slewE / dt;
 
   st.phase = phase;
   st.force = fCmd;
   st.faero = faNow;
-  st.inst = inst;
   st.time += dt;
   st.cycleT += dt;
 }
@@ -500,11 +512,20 @@ function sub(st, dt) {
 export function step(st, dt) {
   const h = st.specs.h || 1 / 200;
   let left = Math.max(0, dt);
+  const net0 = netOf(st);
+  const t0 = st.time;
   while (left > 1e-8) {
     const d = Math.min(h, left);
     sub(st, d);
     left -= d;
   }
+  // Power for the frame, read off the ledger and averaged over the frame, so
+  // the bar integrates to the net beside it. Taking the last substep instead
+  // aliased everything impulsive: a slew spin-up or an end-stop hit lands in
+  // one 5 ms substep, so a 20 ms frame either caught it at four times its
+  // weight or missed it outright. It also never charged the end stop at all.
+  const span = st.time - t0;
+  if (span > 0) st.inst = (netOf(st) - net0) / span;
 }
 
 /** What the chosen plan actually does, for display next to the selector. */
@@ -554,16 +575,21 @@ export function sampleCycle(specs, maxFrames = 5000) {
   const mark = st.cycles;
   const frames = [];
   while (st.cycles === mark && frames.length < maxFrames) {
-    frames.push({
+    // Position is the state at this instant; power is the frame that starts
+    // here. Filling it in after the step is what makes the trace sum to the
+    // cycle's net exactly rather than to the frame before it.
+    const f = {
       x: st.x,
       vx: st.vx,
       alpha: st.alpha,
       phase: st.phase,
-      inst: st.inst,
+      inst: 0,
       feather: st.feather,
       slip: st.slip,
-    });
+    };
+    frames.push(f);
     step(st, dt);
+    f.inst = st.inst;
   }
   if (frames.length < 2) return null;
   const peak = sustainedPeak(frames.map((f) => f.inst));
