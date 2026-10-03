@@ -183,6 +183,18 @@ header h1 {
   transform: scale(1.18);
 }
 
+.lower {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The picture used to stop here. This is the height the bar gave up. */
+.lower-open {
+  flex: 0 0 auto;
+  height: 4.89rem;
+}
+
 .deck {
   flex: 0 0 auto;
   display: grid;
