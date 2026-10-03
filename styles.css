@@ -210,28 +210,6 @@ header h1 {
 .deck-aside {
   min-width: 0;
   min-height: 1px;
-  display: flex;
-  align-items: flex-start;
-}
-
-.dial-scale {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  height: 4.89rem;
-  margin: 0;
-  color: var(--muted);
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
-  font-size: 0.62rem;
-}
-
-.dial-scale input[type="range"] {
-  -webkit-appearance: slider-vertical;
-  appearance: slider-vertical;
-  width: 18px;
-  height: 4.89rem;
-  margin: 0;
-  accent-color: #7d8fa3;
 }
 
 .phase-row, .net-row, .actions {

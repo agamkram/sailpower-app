@@ -8,8 +8,8 @@ import {
   sampleCycle,
   solvePlan,
   step,
-} from "./sim.js?v=139";
-import { draw, bindCam } from "./view.js?v=139";
+} from "./sim.js?v=140";
+import { draw, bindCam } from "./view.js?v=140";
 
 // v3: the reference sail is 2.5×4 m on a 10 m track with a 0.5 s turn.
 // Saved v2 specs would put the old 5×2 m machine back on screen.
@@ -35,11 +35,6 @@ let postedW = 0;
 let postedV = 0;
 let postedJ = 0;
 let postedAt = 0;
-// Full-scale watts for the dial. The slider's top is the cycle peak plus a
-// thousand, and that is where the selection starts. The dial itself has no
-// extra room: the selected number is the end of the sweep.
-let dialScale = 2000;
-let dialTopSeen = 0;
 
 const $ = (id) => document.getElementById(id);
 
@@ -152,30 +147,8 @@ function clearScrub() {
   $("track-map").classList.remove("is-scrubbing");
 }
 
-function dialTop() {
-  const peak = cycle && cycle.span ? Math.max(0, cycle.span - 1000) : 0;
-  return Math.max(500, Math.round((peak + 1000) / 50) * 50);
-}
-
-function syncDialScale() {
-  const top = dialTop();
-  const input = $("dial-scale");
-  if (!input) return;
-  input.min = "200";
-  input.step = "50";
-  input.max = String(top);
-  if (top !== dialTopSeen) {
-    dialTopSeen = top;
-    dialScale = top;
-  }
-  dialScale = Math.min(top, Math.max(200, dialScale));
-  input.value = String(dialScale);
-  $("o-dial").textContent = Math.round(dialScale).toLocaleString("en-US") + " W";
-}
-
 function refreshSpan() {
   ensureCycle();
-  syncDialScale();
 }
 
 function scheduleSpan() {
@@ -242,7 +215,8 @@ function paint() {
  * One round dial, as tall as its box. The top half is power: green is watts
  * being made, yellow is watts being used. The bottom half is speed. Straight
  * up and straight down are zero. Right is downwind, left is the return.
- * Full scale is the hard part of one settled cycle.
+ * Each hand is scaled to its own hardest moment in the cycle, so that moment
+ * reaches the end of its half.
  */
 function paintGauge() {
   const canvas = $("gauge");
@@ -262,12 +236,23 @@ function paintGauge() {
   ctx.clearRect(0, 0, w, h);
 
   const frames = cycle && cycle.frames;
-  let speedScale = Math.max(1, Math.abs(state.specs.wind), Math.abs(state.specs.vReturn || 0));
+  let genScale = 1;
+  let useScale = 1;
+  let outScale = 1;
+  let backScale = 1;
   if (frames && frames.length > 1) {
-    for (const f of frames) speedScale = Math.max(speedScale, Math.abs(f.vx));
+    for (const f of frames) {
+      if (f.inst > genScale) genScale = f.inst;
+      if (f.inst < 0 && -f.inst > useScale) useScale = -f.inst;
+      if (f.vx > outScale) outScale = f.vx;
+      if (f.vx < 0 && -f.vx > backScale) backScale = -f.vx;
+    }
   }
+  const gen = Math.max(0, state.inst) / genScale;
+  const use = Math.max(0, -state.inst) / useScale;
+  const speed = state.vx >= 0 ? state.vx / outScale : state.vx / backScale;
   const r = Math.max(8, h / 2 - 3);
-  drawRoundDial(ctx, w / 2, h / 2, r, state.inst / Math.max(1, dialScale), state.vx / speedScale);
+  drawRoundDial(ctx, w / 2, h / 2, r, gen, use, speed);
 }
 
 /** Top half. -1 is left, 0 is up, 1 is right. */
@@ -282,11 +267,10 @@ function speedAngle(t) {
   return Math.PI / 2 - v * (Math.PI / 2);
 }
 
-function drawRoundDial(ctx, cx, cy, r, power, speed) {
-  const p = Math.max(-1, Math.min(1, power));
+function drawRoundDial(ctx, cx, cy, r, genIn, useIn, speed) {
   const s = Math.max(-1, Math.min(1, speed));
-  const gen = Math.max(0, p);
-  const use = Math.max(0, -p);
+  const gen = Math.max(0, Math.min(1, genIn));
+  const use = Math.max(0, Math.min(1, useIn));
   ctx.lineCap = "round";
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
@@ -480,10 +464,6 @@ $("solve").addEventListener("click", async () => {
     btn.textContent = "Solve";
     btn.disabled = false;
   }
-});
-$("dial-scale").addEventListener("input", () => {
-  dialScale = Number($("dial-scale").value);
-  $("o-dial").textContent = Math.round(dialScale).toLocaleString("en-US") + " W";
 });
 for (const id of FIELDS) {
   $(id).addEventListener("input", () => {
