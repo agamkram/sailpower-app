@@ -1,6 +1,6 @@
 /** Side view of the machine. Face-on sail is the thin plate. Edge-on sail faces the camera. */
 
-import { stroke } from "./sim.js?v=115";
+import { stroke } from "./sim.js?v=116";
 
 function sub(a, b) {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -95,13 +95,14 @@ function reseedWind(p, xLo, xHi, sailTop, atSail, inlet) {
  * Picture of the air around the plate. The force model is not touched.
  *
  * In coordinates stretched so the plate's outline is a unit circle, each term
- * comes from an axisymmetric stream function: a centreline gaussian for the
- * cushion, the bubble and the wake, and a ring gaussian for the rim. The
- * radial velocity is the one that cancels the streamwise divergence, so the
- * grains cannot pile up where the air slows. A traveling wave in the
- * horizontal plane, also drawn from a stream function, sheds across the width
- * at a Strouhal number of 0.15. Edge-on, the projected width collapses and
- * the wave is faded out, so the plate throws nothing.
+ * is a centreline gaussian from an axisymmetric stream function: the cushion,
+ * the bubble and the wake. The radial velocity is the one that cancels the
+ * streamwise divergence, so the grains cannot pile up where the air slows.
+ * A ring of extra speed at the rim was a throat, and outside air swooped down
+ * onto the edge and back off it. The plate is a blockage, so the air spreads
+ * out to get past and does not pinch onto the edge. A traveling wave in the
+ * horizontal plane sheds across the width at a Strouhal number of 0.15.
+ * Edge-on, the projected width collapses and the wave is faded out.
  */
 function sailFlow(p, sail) {
   const Um = Math.abs(sail.U);
@@ -136,25 +137,10 @@ function sailFlow(p, sail) {
     if (rho < 1e-3) ur += -Ap * rho * 0.5;
     else ur += -Ap * (sr2 / rho) * (1 - e);
   };
-  const rim = (M, x0, sx, sr) => {
-    const dx = xi - x0;
-    const sx2 = sx * sx;
-    const A = M * Math.exp((-0.5 * dx * dx) / sx2);
-    const Ap = (A * -dx) / sx2;
-    const sr2 = sr * sr;
-    const a = (rho * rho) / (2 * sr2);
-    const e = Math.exp(-a);
-    uxi += A * rho * rho * e;
-    const bracket = 1 - e * (a + 1);
-    if (rho < 1e-3) ur += -Ap * rho * rho * rho * 0.25;
-    else ur += -Ap * ((2 * sr2 * sr2) / rho) * bracket;
-  };
-
   // Fractions of the relative wind. ξ is in projected widths. The cushion is
   // centred just behind the face, so on the plate itself the air is still
   // spreading toward the rim rather than sitting at the stagnation line.
   gauss(-0.55, 0.22, 0.42, 0.58);
-  rim(2.05, -0.06, 0.3, 0.707);
   gauss(-1.7, 1.2, 0.48, 0.38);
   gauss(-0.28, 2.6, 1.15, 0.75);
   gauss(-0.16, 5.5, 2, 1.1);
