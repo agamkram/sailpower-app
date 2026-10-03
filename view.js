@@ -1,6 +1,6 @@
 /** Side view of the machine. Face-on sail is the thin plate. Edge-on sail faces the camera. */
 
-import { stroke } from "./sim.js?v=140";
+import { stroke } from "./sim.js?v=141";
 
 function sub(a, b) {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -127,47 +127,85 @@ function outsideAir(p, band, xLo, xHi) {
  * horizontal plane sheds across the width at a Strouhal number of 0.15.
  * Edge-on, the projected width collapses and the wave is faded out.
  */
-function sailFlow(p, sail) {
+const lobeAcc = [0, 0];
+const wash = [0, 0, 0];
+
+function addGauss(xi, rho, M, x0, sx, sr) {
+  const dx = xi - x0;
+  const sx2 = sx * sx;
+  const A = M * Math.exp((-0.5 * dx * dx) / sx2);
+  const Ap = (A * -dx) / sx2;
+  const sr2 = sr * sr;
+  const a = (rho * rho) / (2 * sr2);
+  const e = Math.exp(-a);
+  lobeAcc[0] += A * e;
+  lobeAcc[1] += rho < 1e-3 ? -Ap * rho * 0.5 : -Ap * (sr2 / rho) * (1 - e);
+}
+
+/** Sail terms that do not change from grain to grain. Null when the plate sheds nothing. */
+function windField(sail) {
   const Um = Math.abs(sail.U);
-  if (Um < 0.15) return [0, 0, 0];
+  if (Um < 0.15) return null;
   const face = Math.abs(Math.cos(sail.yaw));
   const edge = Math.abs(Math.sin(sail.yaw));
   let gate = (face - 0.1) / 0.25;
-  if (gate <= 0) return [0, 0, 0];
+  if (gate <= 0) return null;
   if (gate > 1) gate = 1;
   gate = gate * gate * (3 - 2 * gate);
   const Wp = sail.halfW * face + (sail.thick || 0.006) * 0.5 * edge;
-  if (Wp < 0.04) return [0, 0, 0];
+  if (Wp < 0.04) return null;
   const H = Math.max(0.2, sail.halfH);
   const R0 = 2 * Wp;
-  const dir = Math.sign(sail.U) || 1;
-  const xi = ((p.x - sail.bx) * dir) / R0;
-  const Y = (p.y - sail.midY) / H;
-  const Z = p.z / Wp;
+  return {
+    Um,
+    gate,
+    Wp,
+    H,
+    R0,
+    dir: Math.sign(sail.U) || 1,
+    bx: sail.bx,
+    midY: sail.midY,
+    time: sail.time || 0,
+  };
+}
+
+function sailFlow(p, field, out) {
+  if (!field) {
+    out[0] = 0;
+    out[1] = 0;
+    out[2] = 0;
+    return out;
+  }
+  const xi = ((p.x - field.bx) * field.dir) / field.R0;
+  // Upstream of the cushion and past the last wake lobe the disturbance is
+  // gone. Most of the stream is out here, and it used to pay for the full
+  // field anyway.
+  if (xi < -3.5 || xi > 18) {
+    out[0] = 0;
+    out[1] = 0;
+    out[2] = 0;
+    return out;
+  }
+  const Y = (p.y - field.midY) / field.H;
+  const Z = p.z / field.Wp;
   const rho = Math.hypot(Y, Z);
 
-  let uxi = 0;
-  let ur = 0;
-  const gauss = (M, x0, sx, sr) => {
-    const dx = xi - x0;
-    const sx2 = sx * sx;
-    const A = M * Math.exp((-0.5 * dx * dx) / sx2);
-    const Ap = (A * -dx) / sx2;
-    const sr2 = sr * sr;
-    const a = (rho * rho) / (2 * sr2);
-    const e = Math.exp(-a);
-    uxi += A * e;
-    if (rho < 1e-3) ur += -Ap * rho * 0.5;
-    else ur += -Ap * (sr2 / rho) * (1 - e);
-  };
+  lobeAcc[0] = 0;
+  lobeAcc[1] = 0;
   // Fractions of the relative wind. ξ is in projected widths. The cushion is
   // centred just behind the face, so on the plate itself the air is still
   // spreading toward the rim rather than sitting at the stagnation line.
-  gauss(-0.55, 0.22, 0.42, 0.58);
-  gauss(-1.7, 1.2, 0.48, 0.38);
-  gauss(-0.28, 2.6, 1.15, 0.75);
-  gauss(-0.16, 5.5, 2, 1.1);
-  gauss(-0.09, 10, 3, 1.5);
+  addGauss(xi, rho, -0.55, 0.22, 0.42, 0.58);
+  addGauss(xi, rho, -1.7, 1.2, 0.48, 0.38);
+  addGauss(xi, rho, -0.28, 2.6, 1.15, 0.75);
+  addGauss(xi, rho, -0.16, 5.5, 2, 1.1);
+  addGauss(xi, rho, -0.09, 10, 3, 1.5);
+  const uxi = lobeAcc[0];
+  const ur = lobeAcc[1];
+  const Um = field.Um;
+  const R0 = field.R0;
+  const H = field.H;
+  const Wp = field.Wp;
 
   const k = (2 * Math.PI) / 5.3;
   const L = 8;
@@ -176,7 +214,7 @@ function sailFlow(p, sail) {
   const sy = 0.75;
   const eps = 0.16;
   const freq = (0.15 * Um) / R0;
-  const ang = k * xi - 2 * Math.PI * freq * (sail.time || 0);
+  const ang = k * xi - 2 * Math.PI * freq * field.time;
   const Sig = 1 / (1 + Math.exp(-xi / w));
   const env = Sig * Math.exp(-xi / L);
   const envp = env * ((1 - Sig) / w - 1 / L);
@@ -188,11 +226,11 @@ function sailFlow(p, sail) {
   const phiZ = Gy * -eps * Gz * (k * C * env + S * envp);
 
   const inv = rho < 1e-4 ? 0 : 1 / rho;
-  const scale = Um * gate;
-  const vxi = scale * (uxi + phiX);
-  const vy = scale * (H / R0) * (ur * Y * inv);
-  const vz = scale * (Wp / R0) * (ur * Z * inv + phiZ);
-  return [dir * vxi, vy, vz];
+  const scale = Um * field.gate;
+  out[0] = field.dir * scale * (uxi + phiX);
+  out[1] = scale * (H / R0) * (ur * Y * inv);
+  out[2] = scale * (Wp / R0) * (ur * Z * inv + phiZ);
+  return out;
 }
 
 /**
@@ -479,7 +517,9 @@ export function bindCam(canvas, onChange) {
 
 export function draw(canvas, st) {
   const ctx = canvas.getContext("2d");
-  const dpr = Math.max(2, Math.min(3, window.devicePixelRatio || 1));
+  // Two device pixels is enough for the grains. A phone at 3x was redrawing
+  // more than twice the pixels of a 2x backing store, every frame.
+  const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
   const w = canvas.clientWidth;
   const h = canvas.clientHeight;
   if (w < 2 || h < 2) return;
@@ -920,9 +960,10 @@ export function draw(canvas, st) {
       time: windClock,
     };
     windDraw.length = 0;
+    const field = windField(sail);
     for (let i = 0; i < count; i++) {
       const p = windParts[i];
-      const wash = sailFlow(p, sail);
+      sailFlow(p, field, wash);
       p.ox = wash[0];
       p.oy = wash[1];
       p.oz = wash[2];
@@ -943,7 +984,7 @@ export function draw(canvas, st) {
           seedSmoke(p, sail);
           p.live = true;
         }
-        const wash = sailFlow(p, sail);
+        sailFlow(p, field, wash);
         p.x += (speed + wash[0]) * dt;
         p.y += wash[1] * dt;
         p.z += wash[2] * dt;

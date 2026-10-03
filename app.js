@@ -8,8 +8,8 @@ import {
   sampleCycle,
   solvePlan,
   step,
-} from "./sim.js?v=140";
-import { draw, bindCam } from "./view.js?v=140";
+} from "./sim.js?v=141";
+import { draw, bindCam } from "./view.js?v=141";
 
 // v3: the reference sail is 2.5×4 m on a 10 m track with a 0.5 s turn.
 // Saved v2 specs would put the old 5×2 m machine back on screen.
@@ -236,18 +236,26 @@ function paintGauge() {
   ctx.clearRect(0, 0, w, h);
 
   const frames = cycle && cycle.frames;
-  let genScale = 1;
-  let useScale = 1;
-  let outScale = 1;
-  let backScale = 1;
-  if (frames && frames.length > 1) {
+  let scales = cycle && cycle.needles;
+  if (frames && frames.length > 1 && !scales) {
+    let genScale = 1;
+    let useScale = 1;
+    let outScale = 1;
+    let backScale = 1;
     for (const f of frames) {
       if (f.inst > genScale) genScale = f.inst;
       if (f.inst < 0 && -f.inst > useScale) useScale = -f.inst;
       if (f.vx > outScale) outScale = f.vx;
       if (f.vx < 0 && -f.vx > backScale) backScale = -f.vx;
     }
+    scales = { gen: genScale, use: useScale, out: outScale, back: backScale };
+    cycle.needles = scales;
   }
+  if (!scales) scales = { gen: 1, use: 1, out: 1, back: 1 };
+  const genScale = scales.gen;
+  const useScale = scales.use;
+  const outScale = scales.out;
+  const backScale = scales.back;
   const gen = Math.max(0, state.inst) / genScale;
   const use = Math.max(0, -state.inst) / useScale;
   const speed = state.vx >= 0 ? state.vx / outScale : state.vx / backScale;
@@ -323,6 +331,8 @@ function drawRoundDial(ctx, cx, cy, r, genIn, useIn, speed) {
   ctx.fillText("m/s", cx - r * 0.2, cy + r * 0.36);
 }
 
+let raf = 0;
+
 function frame(t) {
   if (running) {
     const dt = last ? Math.min(0.05, (t - last) / 1000) : 0;
@@ -332,8 +342,25 @@ function frame(t) {
     last = t;
   }
   paint();
-  requestAnimationFrame(frame);
+  raf = document.hidden ? 0 : requestAnimationFrame(frame);
 }
+
+function startLoop() {
+  if (raf || document.hidden) return;
+  last = 0;
+  shownAt = 0;
+  raf = requestAnimationFrame(frame);
+}
+
+function stopLoop() {
+  cancelAnimationFrame(raf);
+  raf = 0;
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) stopLoop();
+  else startLoop();
+});
 
 function setRunning(on) {
   if (on) {
@@ -490,4 +517,4 @@ paint();
 window.addEventListener("resize", pin);
 window.visualViewport?.addEventListener("resize", pin);
 window.visualViewport?.addEventListener("scroll", pin);
-requestAnimationFrame(frame);
+startLoop();
