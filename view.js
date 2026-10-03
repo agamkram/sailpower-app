@@ -1,6 +1,6 @@
 /** Side view of the machine. Face-on sail is the thin plate. Edge-on sail faces the camera. */
 
-import { stroke } from "./sim.js?v=119";
+import { stroke } from "./sim.js?v=122";
 
 function sub(a, b) {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -78,38 +78,36 @@ function windDt(st) {
   return wall;
 }
 
-/** Where the plate actually moves the air: just upstream, the wake, and the rim. */
-function airBox(band, bx) {
-  const R = Math.max(band.halfW, band.halfH, 0.4);
+/**
+ * Cross-section the plate can move, as wide as the sail plus the air that
+ * bends at the rim. The stream itself runs the whole view.
+ */
+function airSection(band) {
   return {
-    x0: bx - R * 1.35,
-    x1: bx + R * 2.6,
     zHalf: band.halfW + 0.45,
     y0: Math.max(0.25, band.midY - band.halfH - 0.2),
     y1: band.midY + band.halfH + 0.55,
   };
 }
 
-function reseedWind(p, band, bx, inlet) {
+function reseedWind(p, band, xLo, xHi, inlet) {
   p.ox = 0;
   p.oy = 0;
   p.oz = 0;
   p.a = 0.35 + Math.random() * 0.4;
-  // A corridor the length of the track and several times wider than the sail
-  // was free stream the plate never touches. Looking through it hid the air
-  // the machine actually moves.
-  const box = airBox(band, bx);
+  const box = airSection(band);
   p.z = (Math.random() - 0.5) * 2 * box.zHalf;
   p.y = box.y0 + Math.random() * Math.max(0.4, box.y1 - box.y0);
-  p.x = inlet ? box.x0 : box.x0 + Math.random() * Math.max(0.4, box.x1 - box.x0);
+  // Upstream edge of the view, so the stream comes in off screen.
+  p.x = inlet ? xLo : xLo + Math.random() * Math.max(0.4, xHi - xLo);
 }
 
-/** Left the region the sail can influence. */
-function outsideAir(p, band, bx) {
-  const box = airBox(band, bx);
+/** Left the sail's cross-section, or the view. */
+function outsideAir(p, band, xLo, xHi) {
+  const box = airSection(band);
   return (
-    p.x < box.x0 - 0.15 ||
-    p.x > box.x1 + 0.35 ||
+    p.x < xLo ||
+    p.x > xHi ||
     Math.abs(p.z) > box.zHalf + 0.7 ||
     p.y > box.y1 + 0.45 ||
     p.y < box.y0 - 0.35
@@ -251,10 +249,12 @@ function holdOffPlate(p, sail) {
 }
 
 
+// Side-on. An along-track offset made the rails run uphill; yaw orbits
+// around the vertical from here, and the machine stays on the ground.
 const CAM0 = {
-  yaw: Math.atan2(-1.7, 7.78),
-  pitch: Math.asin(2.55 / Math.hypot(1.7, 2.55, 7.78)),
-  dist: Math.hypot(1.7, 2.55, 7.78),
+  yaw: 0,
+  pitch: Math.asin(2.55 / Math.hypot(2.55, 7.78)),
+  dist: Math.hypot(2.55, 7.78),
 };
 const FOV = 0.98;
 const camCtl = { yaw: CAM0.yaw, pitch: CAM0.pitch, dist: CAM0.dist };
@@ -267,60 +267,18 @@ export function resetCam() {
   camCtl.pitch = CAM0.pitch;
 }
 
-/**
- * Look-at basis, rolled so the track chord is horizontal on screen.
- * A straight rail is a straight line in perspective, and the home camera
- * sits off one end, so that line runs uphill. Orbiting makes it worse.
- * World-up is kept when the view is down the track, where the chord is too
- * short to level without tipping the horizon over.
- */
-function viewBasis(eye, target, w, h, alongA, alongB) {
+/** Look-at with world up. Dragging orbits the camera; the machine stays planted. */
+function viewBasis(eye, target, h) {
   const zaxis = norm(sub(eye, target));
   let right = cross([0, 1, 0], zaxis);
   const rl = Math.hypot(right[0], right[1], right[2]);
   if (rl < 1e-4) right = [1, 0, 0];
   else right = [right[0] / rl, right[1] / rl, right[2] / rl];
-  let up = cross(zaxis, right);
-  const fLen = h / 2 / Math.tan(FOV / 2);
-  const screen = (p, xa, ya) => {
-    const d = sub(p, eye);
-    const depth = -dot(d, zaxis);
-    if (depth < 0.2) return null;
-    return {
-      x: (dot(d, xa) / depth) * fLen,
-      y: -(dot(d, ya) / depth) * fLen,
-    };
-  };
-  const qa = screen(alongA, right, up);
-  const qb = screen(alongB, right, up);
-  if (qa && qb) {
-    const dx = qb.x - qa.x;
-    const dy = qb.y - qa.y;
-    const span = Math.hypot(dx, dy);
-    if (span > 8 && Math.abs(dx) > span * 0.35) {
-      let ang = Math.atan2(dy, dx);
-      if (ang > Math.PI / 2) ang -= Math.PI;
-      else if (ang < -Math.PI / 2) ang += Math.PI;
-      const c = Math.cos(ang);
-      const s = -Math.sin(ang);
-      const xa = right;
-      const ya = up;
-      right = [
-        c * xa[0] + s * ya[0],
-        c * xa[1] + s * ya[1],
-        c * xa[2] + s * ya[2],
-      ];
-      up = [
-        -s * xa[0] + c * ya[0],
-        -s * xa[1] + c * ya[1],
-        -s * xa[2] + c * ya[2],
-      ];
-    }
-  }
-  return { xaxis: right, yaxis: up, zaxis, fLen };
+  const up = cross(zaxis, right);
+  return { xaxis: right, yaxis: up, zaxis, fLen: h / 2 / Math.tan(FOV / 2) };
 }
 
-function projectHome(dist, target, p, w, h, alongA, alongB) {
+function projectHome(dist, target, p, w, h) {
   const cp = Math.cos(CAM0.pitch);
   const sp = Math.sin(CAM0.pitch);
   const cy = Math.cos(CAM0.yaw);
@@ -330,7 +288,7 @@ function projectHome(dist, target, p, w, h, alongA, alongB) {
     target[1] + dist * sp,
     target[2] + dist * cp * cy,
   ];
-  const { xaxis, yaxis, zaxis, fLen } = viewBasis(eye, target, w, h, alongA, alongB);
+  const { xaxis, yaxis, zaxis, fLen } = viewBasis(eye, target, h);
   const d = sub(p, eye);
   const depth = -dot(d, zaxis);
   if (depth < 0.2) return null;
@@ -354,11 +312,9 @@ function homeDist(s, w, h, target, lo, hi, cap0, cap1, sailTop) {
   ];
   const marginX = w * 0.06;
   const marginY = h * 0.07;
-  const alongA = [cap0, 0.2, 0];
-  const alongB = [cap1, 0.2, 0];
   const covers = (dist) => {
     for (const p of pts) {
-      const q = projectHome(dist, target, p, w, h, alongA, alongB);
+      const q = projectHome(dist, target, p, w, h);
       if (!q) return false;
       if (q.x < marginX || q.x > w - marginX || q.y < marginY || q.y > h - marginY) return false;
     }
@@ -527,7 +483,7 @@ export function draw(canvas, st) {
     target[1] + camCtl.dist * sp,
     target[2] + camCtl.dist * cp * cy,
   ];
-  const level = viewBasis(eye, target, w, h, [cap0, 0.2, 0], [cap1, 0.2, 0]);
+  const level = viewBasis(eye, target, h);
   const cam = {
     eye,
     xaxis: level.xaxis,
@@ -896,15 +852,46 @@ export function draw(canvas, st) {
     ctx.fill();
   }
 
-  // Grains stay with the sail. A circle reads as a ball, so these stay square.
+  // Grains run off both edges of the view, only as wide as the sail.
+  // A circle reads as a ball, so these stay square.
   {
     const dt = windDt(st);
     const speed = Math.max(0, s.wind);
     const band = { halfW: s.plateW / 2, halfH: s.plateH / 2, midY };
-    const count = Math.min(1400, Math.round(Math.max(6, band.halfW + band.halfH) * 280));
+    // World x that lands just off each side of the screen at the stream's
+    // height, so the grains come in off one edge and leave off the other.
+    const at = (x) => {
+      const q = project([x, midY, 0]);
+      return q ? q.x : null;
+    };
+    const span = at(bx + 4) - at(bx - 4);
+    const outward = span < 0 ? -1 : 1;
+    const worldXAt = (screenX) => {
+      let lo = bx - 50;
+      let hi = bx + 50;
+      for (let i = 0; i < 18; i++) {
+        const mid = (lo + hi) / 2;
+        const sx = at(mid);
+        if (sx == null || (sx - screenX) * outward < 0) lo = mid;
+        else hi = mid;
+      }
+      return (lo + hi) / 2;
+    };
+    let stream0 = worldXAt(-0.08 * w);
+    let stream1 = worldXAt(1.08 * w);
+    if (stream0 > stream1) {
+      const swap = stream0;
+      stream0 = stream1;
+      stream1 = swap;
+    }
+    if (!(stream1 - stream0 > 1) || stream1 - stream0 > 80) {
+      stream0 = xLo - 6;
+      stream1 = xHi + 6;
+    }
+    const count = Math.min(1800, Math.round(Math.max(8, stream1 - stream0) * 70));
     while (windParts.length < count) {
       const p = { x: 0, y: 0, z: 0, ox: 0, oy: 0, oz: 0, a: 0.5 };
-      reseedWind(p, band, bx);
+      reseedWind(p, band, stream0, stream1);
       windParts.push(p);
     }
     if (windParts.length > count) windParts.length = count;
@@ -930,7 +917,7 @@ export function draw(canvas, st) {
       p.y += p.oy * dt;
       p.z += p.oz * dt;
       holdOffPlate(p, sail);
-      if (outsideAir(p, band, bx)) reseedWind(p, band, bx, true);
+      if (outsideAir(p, band, stream0, stream1)) reseedWind(p, band, stream0, stream1, true);
       const q = project([p.x, p.y, p.z]);
       if (!q || q.z < 0.4) continue;
       windDraw.push({ p, q, z: q.z });
