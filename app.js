@@ -8,8 +8,8 @@ import {
   sampleCycle,
   solvePlan,
   step,
-} from "./sim.js?v=129";
-import { draw, bindCam } from "./view.js?v=129";
+} from "./sim.js?v=130";
+import { draw, bindCam } from "./view.js?v=130";
 
 // v3: the reference sail is 2.5×4 m on a 10 m track with a 0.5 s turn.
 // Saved v2 specs would put the old 5×2 m machine back on screen.
@@ -183,9 +183,9 @@ function paint() {
 }
 
 /**
- * Two dials. Straight up is zero. Right is downwind power and downwind
- * speed, left is the cost of the return. Full scale is the hard part of
- * one settled cycle, so a normal stroke uses the face of the dial.
+ * One round dial, as tall as its box. Straight up is zero. Right is downwind,
+ * left is the return. The long hand is power, the short blue hand is speed.
+ * Full scale is the hard part of one settled cycle.
  */
 function paintGauge() {
   const canvas = $("gauge");
@@ -211,42 +211,53 @@ function paintGauge() {
     powerScale = Math.max(1, (cycle.span || 0) - 1000);
     for (const f of frames) speedScale = Math.max(speedScale, Math.abs(f.vx));
   }
-  const gap = 18;
-  const slot = (w - gap) / 2;
-  const r = Math.max(8, Math.min(h - 10, slot / 2 - 6));
-  drawDial(ctx, slot / 2, h - 2, r, state.inst / powerScale, "W");
-  drawDial(ctx, slot + gap + slot / 2, h - 2, r, state.vx / speedScale, "m/s");
+  const r = Math.max(8, h / 2 - 3);
+  drawRoundDial(ctx, w / 2, h / 2, r, state.inst / powerScale, state.vx / speedScale);
 }
 
-function drawDial(ctx, cx, cy, r, t, label) {
+function dialAngle(t) {
   const v = Math.max(-1, Math.min(1, t));
-  const ang = Math.PI + ((v + 1) / 2) * Math.PI;
+  return Math.PI + ((v + 1) / 2) * Math.PI;
+}
+
+function drawRoundDial(ctx, cx, cy, r, power, speed) {
+  const p = Math.max(-1, Math.min(1, power));
   ctx.lineCap = "round";
   ctx.beginPath();
-  ctx.arc(cx, cy, r, Math.PI, 2 * Math.PI);
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
   ctx.strokeStyle = "rgba(255, 255, 255, 0.16)";
   ctx.lineWidth = 4;
   ctx.stroke();
   ctx.beginPath();
-  ctx.arc(cx, cy, r, 1.5 * Math.PI, ang, v < 0);
-  ctx.strokeStyle = v >= 0 ? "#34d399" : "#fbbf24";
+  ctx.arc(cx, cy, r, 1.5 * Math.PI, dialAngle(p), p < 0);
+  ctx.strokeStyle = p >= 0 ? "#34d399" : "#fbbf24";
   ctx.lineWidth = 4;
   ctx.stroke();
+
+  const hand = (t, len, color, width) => {
+    const ang = dialAngle(t);
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(ang) * len, cy + Math.sin(ang) * len);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.stroke();
+  };
+  hand(speed, r * 0.58, "#3d9cf5", 2);
+  hand(p, r - 7, p >= 0 ? "#34d399" : "#fbbf24", 1.75);
   ctx.beginPath();
-  ctx.moveTo(cx, cy);
-  ctx.lineTo(cx + Math.cos(ang) * (r - 7), cy + Math.sin(ang) * (r - 7));
-  ctx.strokeStyle = "#e8edf4";
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(cx, cy, 2.4, 0, Math.PI * 2);
+  ctx.arc(cx, cy, 2.6, 0, Math.PI * 2);
   ctx.fillStyle = "#e8edf4";
   ctx.fill();
-  ctx.fillStyle = "rgba(125, 143, 163, 0.95)";
-  ctx.font = "600 11px IBM Plex Mono, ui-monospace, monospace";
+
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText(label, cx, cy - r * 0.42);
+  ctx.font = "600 10px IBM Plex Mono, ui-monospace, monospace";
+  ctx.fillStyle = "#34d399";
+  ctx.fillText("W", cx, cy + r * 0.34);
+  ctx.fillStyle = "#3d9cf5";
+  ctx.font = "600 9px IBM Plex Mono, ui-monospace, monospace";
+  ctx.fillText("m/s", cx, cy + r * 0.58);
 }
 
 function frame(t) {
