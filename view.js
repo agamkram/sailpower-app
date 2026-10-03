@@ -1,6 +1,6 @@
 /** Side view of the machine. Face-on sail is the thin plate. Edge-on sail faces the camera. */
 
-import { stroke } from "./sim.js?v=122";
+import { stroke } from "./sim.js?v=123";
 
 function sub(a, b) {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -858,36 +858,12 @@ export function draw(canvas, st) {
     const dt = windDt(st);
     const speed = Math.max(0, s.wind);
     const band = { halfW: s.plateW / 2, halfH: s.plateH / 2, midY };
-    // World x that lands just off each side of the screen at the stream's
-    // height, so the grains come in off one edge and leave off the other.
-    const at = (x) => {
-      const q = project([x, midY, 0]);
-      return q ? q.x : null;
-    };
-    const span = at(bx + 4) - at(bx - 4);
-    const outward = span < 0 ? -1 : 1;
-    const worldXAt = (screenX) => {
-      let lo = bx - 50;
-      let hi = bx + 50;
-      for (let i = 0; i < 18; i++) {
-        const mid = (lo + hi) / 2;
-        const sx = at(mid);
-        if (sx == null || (sx - screenX) * outward < 0) lo = mid;
-        else hi = mid;
-      }
-      return (lo + hi) / 2;
-    };
-    let stream0 = worldXAt(-0.08 * w);
-    let stream1 = worldXAt(1.08 * w);
-    if (stream0 > stream1) {
-      const swap = stream0;
-      stream0 = stream1;
-      stream1 = swap;
-    }
-    if (!(stream1 - stream0 > 1) || stream1 - stream0 > 80) {
-      stream0 = xLo - 6;
-      stream1 = xHi + 6;
-    }
+    // Fixed in the world, past both ends of the track. Tying the ends to the
+    // screen made every camera drag move the window, and the grains were put
+    // back at the inlet on each move, so the wind stopped until the drag ended.
+    const pad = Math.max(8, (cap1 - cap0) * 0.45);
+    const stream0 = cap0 - pad;
+    const stream1 = cap1 + pad;
     const count = Math.min(1800, Math.round(Math.max(8, stream1 - stream0) * 70));
     while (windParts.length < count) {
       const p = { x: 0, y: 0, z: 0, ox: 0, oy: 0, oz: 0, a: 0.5 };
