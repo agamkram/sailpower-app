@@ -8,19 +8,17 @@ import {
   sampleCycle,
   solvePlan,
   step,
-} from "./sim.js?v=124";
-import { draw, bindCam } from "./view.js?v=124";
+} from "./sim.js?v=125";
+import { draw, bindCam } from "./view.js?v=125";
 
 // v3: the reference sail is 2.5×4 m on a 10 m track with a 0.5 s turn.
 // Saved v2 specs would put the old 5×2 m machine back on screen.
 const KEY = "windcart-v3";
-const RATES = [1, 4, 8];
 const FIELDS = ["wind", "plateW", "plateH", "track", "mass", "outFrac", "vReturn", "turn", "fMax", "cd", "eta", "crr"];
 
 let specs = loadSpecs();
 let state = createState(specs);
 let running = false;
-let rate = 1;
 let last = 0;
 let powerScale = 1500;
 let spanTimer = 0;
@@ -207,7 +205,7 @@ function frame(t) {
   if (running) {
     const dt = last ? Math.min(0.05, (t - last) / 1000) : 0;
     last = t;
-    if (dt > 0) step(state, dt * rate);
+    if (dt > 0) step(state, dt);
   } else {
     last = t;
   }
@@ -344,11 +342,6 @@ $("solve").addEventListener("click", async () => {
     btn.textContent = "Solve";
     btn.disabled = false;
   }
-});
-$("rate").addEventListener("click", () => {
-  const i = RATES.indexOf(rate);
-  rate = RATES[(i + 1) % RATES.length];
-  $("rate").textContent = rate + "×";
 });
 for (const id of FIELDS) {
   $(id).addEventListener("input", () => {

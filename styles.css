@@ -257,6 +257,12 @@ header h1 {
 
 .actions {
   flex: 0 0 auto;
+  justify-content: flex-start;
+}
+
+.actions button {
+  padding: 0.2rem 0.5rem;
+  font-size: 0.66rem;
 }
 
 button, .btn {
