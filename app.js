@@ -9,8 +9,8 @@ import {
   sampleCycle,
   solvePlan,
   step,
-} from "./sim.js?v=104";
-import { draw, bindCam } from "./view.js?v=104";
+} from "./sim.js?v=106";
+import { draw, bindCam } from "./view.js?v=106";
 
 // v3: the reference sail is 2.5×4 m on a 10 m track with a 0.5 s turn.
 // Saved v2 specs would put the old 5×2 m machine back on screen.
@@ -24,6 +24,7 @@ let running = false;
 let rate = 1;
 let last = 0;
 let powerScale = 1500;
+let spanTimer = 0;
 // One settled cycle, cached, so the scrubber has something to slide along.
 let cycle = null;
 let cycleKey = "";
@@ -148,6 +149,30 @@ function clearScrub() {
   $("track-map").classList.remove("is-scrubbing");
 }
 
+function ceiling(s) {
+  const eta = Math.min(0.99, Math.max(0.2, s.eta ?? 0.95));
+  const v = Math.max(1, Math.abs(s.vReturn), Math.abs(s.wind * (s.outFrac || 0)));
+  return (Math.max(200, s.fMax) * v) / eta + 1000;
+}
+
+function refreshSpan() {
+  const c = ensureCycle();
+  const area = (specs.plateW * specs.plateH).toFixed(1) + " m²";
+  if (!c) {
+    powerScale = 1000;
+    $("scale").textContent = area;
+    return;
+  }
+  powerScale = c.span;
+  $("scale").textContent =
+    area + " · ±" + Math.round(c.span).toLocaleString("en-US") + " W";
+}
+
+function scheduleSpan() {
+  clearTimeout(spanTimer);
+  spanTimer = setTimeout(refreshSpan, 60);
+}
+
 function fmtW(w) {
   const n = Math.round(w);
   const sign = n > 0 ? "+" : "";
@@ -183,7 +208,6 @@ function paint() {
       state.cycles + (state.cycles === 1 ? " cycle" : " cycles") +
       (state.time > 0.5 ? " · " + Math.round(avg) + " W avg" : "");
   }
-  powerScale = Math.max(800, powerScale * 0.998, Math.abs(state.inst) * 1.25);
   const span = powerScale;
   const pct = Math.max(-50, Math.min(50, (state.inst / span) * 50));
   const fill = $("pfill");
@@ -231,7 +255,6 @@ function setRunning(on) {
     clearScrub();
     running = true;
     last = 0;
-    powerScale = 1500;
     $("run").textContent = "Stop";
     $("run").className = "stop";
   } else {
@@ -324,6 +347,7 @@ $("defaults").addEventListener("click", () => {
   clearScrub();
   state = createState(specs);
   fillForm();
+  refreshSpan();
   paint();
 });
 $("solve").addEventListener("click", async () => {
@@ -340,6 +364,7 @@ $("solve").addEventListener("click", async () => {
     clearScrub();
     state = createState(specs);
     fillForm();
+    refreshSpan();
     paint();
     $("warn").textContent = "Best found: " + Math.round(plan.avgW) + " W average";
   } finally {
@@ -357,6 +382,8 @@ for (const id of FIELDS) {
     paintForm();
     specs = readForm();
     dropCycle();
+    powerScale = Math.max(powerScale, ceiling(specs));
+    scheduleSpan();
     const next = createState(specs);
     if (running) state.specs = next.specs;
     else state = next;
@@ -366,6 +393,7 @@ for (const id of FIELDS) {
 }
 
 fillForm();
+refreshSpan();
 pin();
 bindCam($("view"), () => {
   $("cam-hint")?.classList.add("is-gone");

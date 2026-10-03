@@ -1,6 +1,6 @@
 /** Side view of the machine. Face-on sail is the thin plate. Edge-on sail faces the camera. */
 
-import { stroke } from "./sim.js?v=104";
+import { stroke } from "./sim.js?v=106";
 
 function sub(a, b) {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -77,12 +77,12 @@ function windDt(st) {
   return wall;
 }
 
-function reseedWind(p, origin, sailTop, atSail) {
+function reseedWind(p, xLo, xHi, sailTop, atSail) {
   p.ox = 0;
   p.oy = 0;
   p.oz = 0;
   p.a = 0.35 + Math.random() * 0.4;
-  p.x = origin - 4 - Math.random() * 9;
+  p.x = xLo + Math.random() * Math.max(1, xHi - xLo);
   if (atSail) {
     p.y = 0.7 + Math.random() * Math.max(0.5, sailTop - 0.4);
     p.z = (Math.random() - 0.5) * 4.4;
@@ -144,12 +144,71 @@ const CAM0 = {
   pitch: Math.asin(2.55 / Math.hypot(1.7, 2.55, 7.78)),
   dist: Math.hypot(1.7, 2.55, 7.78),
 };
+const FOV = 0.98;
 const camCtl = { yaw: CAM0.yaw, pitch: CAM0.pitch, dist: CAM0.dist };
+// False until the user orbits or pinches. The home view frames the whole run.
+let camHeld = false;
 
 export function resetCam() {
+  camHeld = false;
   camCtl.yaw = CAM0.yaw;
   camCtl.pitch = CAM0.pitch;
-  camCtl.dist = CAM0.dist;
+}
+
+function projectHome(dist, target, p, w, h) {
+  const cp = Math.cos(CAM0.pitch);
+  const sp = Math.sin(CAM0.pitch);
+  const cy = Math.cos(CAM0.yaw);
+  const sy = Math.sin(CAM0.yaw);
+  const eye = [
+    target[0] + dist * cp * sy,
+    target[1] + dist * sp,
+    target[2] + dist * cp * cy,
+  ];
+  const zaxis = norm(sub(eye, target));
+  const xaxis = norm(cross([0, 1, 0], zaxis));
+  const yaxis = cross(zaxis, xaxis);
+  const fLen = h / 2 / Math.tan(FOV / 2);
+  const d = sub(p, eye);
+  const depth = -dot(d, zaxis);
+  if (depth < 0.2) return null;
+  return {
+    x: w / 2 + (dot(d, xaxis) / depth) * fLen,
+    y: h / 2 - (dot(d, yaxis) / depth) * fLen,
+  };
+}
+
+/** Smallest distance that keeps both caps and the sail inside the home view. */
+function homeDist(s, w, h, target, lo, hi, cap0, cap1, sailTop) {
+  const hz = Math.max(0.6, s.plateW / 2);
+  const hx = s.plateW / 2;
+  const pts = [
+    [cap0, 0.15, 0],
+    [cap1, 0.15, 0],
+    [lo - hx, sailTop + 0.2, -hz],
+    [lo - hx, sailTop + 0.2, hz],
+    [hi + hx, sailTop + 0.2, -hz],
+    [hi + hx, sailTop + 0.2, hz],
+  ];
+  const marginX = w * 0.06;
+  const marginY = h * 0.07;
+  const covers = (dist) => {
+    for (const p of pts) {
+      const q = projectHome(dist, target, p, w, h);
+      if (!q) return false;
+      if (q.x < marginX || q.x > w - marginX || q.y < marginY || q.y > h - marginY) return false;
+    }
+    return true;
+  };
+  let loD = 3.2;
+  let hiD = 72;
+  if (!covers(hiD)) return hiD;
+  for (let i = 0; i < 12; i++) {
+    const mid = (loD + hiD) / 2;
+    if (covers(mid)) hiD = mid;
+    else loD = mid;
+  }
+  return hiD;
 }
 
 export function bindCam(canvas, onChange) {
@@ -165,9 +224,10 @@ export function bindCam(canvas, onChange) {
   }
   function clampCam() {
     camCtl.pitch = Math.max(0.08, Math.min(1.35, camCtl.pitch));
-    camCtl.dist = Math.max(3.2, Math.min(18, camCtl.dist));
+    camCtl.dist = Math.max(3.2, Math.min(72, camCtl.dist));
   }
   function fire() {
+    camHeld = true;
     clampCam();
     onChange?.();
   }
@@ -184,7 +244,7 @@ export function bindCam(canvas, onChange) {
         const now = performance.now();
         if (now - lastTap < 280) {
           resetCam();
-          fire();
+          onChange?.();
           lastTap = 0;
         } else {
           lastTap = now;
@@ -277,10 +337,23 @@ export function draw(canvas, st) {
 
   // Looking higher than the old 1.35 aim drops the track in the frame.
   // Extra sail height lifts the aim again, so the top stays inside and the
-  // track drops with it.
+  // track drops with it. The home view frames the whole run, so the cart
+  // travels instead of sitting still while the sail spins. Pinch in and the
+  // view follows the cart again.
   const sailTop = 0.61 + s.plateH;
   const aimY = 1.75 + Math.max(0, sailTop - 2.61) * 0.55;
-  const target = [followX + 0.35, aimY, 0];
+  const { cap0, cap1, lo, hi } = stroke(s);
+  const midX = (cap0 + cap1) / 2;
+  const homeTarget = [midX, aimY, 0];
+  const fitted = homeDist(s, w, h, homeTarget, lo, hi, cap0, cap1, sailTop);
+  if (!camHeld) camCtl.dist = fitted;
+  let follow = 0;
+  if (camHeld) {
+    const near = fitted * 0.55;
+    const far = fitted * 0.85;
+    follow = Math.min(1, Math.max(0, (far - camCtl.dist) / Math.max(0.2, far - near)));
+  }
+  const target = [midX + (followX + 0.35 - midX) * follow, aimY, 0];
   const cp = Math.cos(camCtl.pitch);
   const sp = Math.sin(camCtl.pitch);
   const cy = Math.cos(camCtl.yaw);
@@ -293,8 +366,7 @@ export function draw(canvas, st) {
   const zaxis = norm(sub(eye, target));
   const xaxis = norm(cross([0, 1, 0], zaxis));
   const yaxis = cross(zaxis, xaxis);
-  const fov = 0.98;
-  const fLen = h / 2 / Math.tan(fov / 2);
+  const fLen = h / 2 / Math.tan(FOV / 2);
   const cam = { eye, xaxis, yaxis, zaxis, fLen, w, h };
 
   const polys = [];
@@ -444,7 +516,6 @@ export function draw(canvas, st) {
   const railR = 0.05;
   const railY = 0.2;
   const gauge = s.gauge;
-  const { cap0, cap1 } = stroke(s);
   const bx = st.x;
   const spin = -st.x / 0.062;
 
@@ -656,16 +727,17 @@ export function draw(canvas, st) {
     ctx.fill();
   }
 
-  // One-pixel squares. A circle is a heavier mark and reads as a ball.
+  // Grains fill the framed track. A circle reads as a ball, so these stay square.
   {
     const dt = windDt(st);
     const speed = Math.max(0, s.wind);
     const sailAir = py1;
-    const count = 1040 + Math.round(speed * 24);
+    const xLo = rail0 - 1;
+    const xHi = rail1 + 1;
+    const count = Math.min(2200, Math.round(Math.max(8, xHi - xLo) * 90));
     while (windParts.length < count) {
       const p = { x: 0, y: 0, z: 0, ox: 0, oy: 0, oz: 0, a: 0.5 };
-      reseedWind(p, followX, sailAir, windParts.length % 2 === 0);
-      p.x = followX + (Math.random() - 0.55) * 20;
+      reseedWind(p, xLo, xHi, sailAir, windParts.length % 2 === 0);
       windParts.push(p);
     }
     const sail = {
@@ -708,8 +780,8 @@ export function draw(canvas, st) {
           p.z = lx2 * sn + lz2 * c;
         }
       }
-      if (p.x > followX + 16 || p.x < followX - 18 || p.y > sailAir + 2.4 || p.y < 0.15) {
-        reseedWind(p, followX, sailAir, i % 2 === 0);
+      if (p.x > xHi || p.x < xLo || p.y > sailAir + 2.4 || p.y < 0.15) {
+        reseedWind(p, xLo, xHi, sailAir, i % 2 === 0);
       }
       const q = project([p.x, p.y, p.z]);
       if (!q || q.z < 0.4) continue;
@@ -718,13 +790,22 @@ export function draw(canvas, st) {
         p.y - p.oy * 0.01,
         p.z - p.oz * 0.01,
       ]);
-      windDraw.push({ p, q, back, z: q.z });
+      const minCss = 2 / dpr;
+      const pxPerM = cam.fLen / Math.max(0.5, q.z);
+      windDraw.push({
+        p,
+        q,
+        back,
+        z: q.z,
+        along: Math.max(minCss, 0.015 * pxPerM),
+        across: Math.max(minCss, 0.03 * pxPerM),
+      });
     }
     ctx.save();
     ctx.fillStyle = "rgb(214, 230, 240)";
     for (const dot of windDraw) {
       if (dot.z < depthOf([bx, midY, 0]) - 0.05) continue;
-      paintGrain(ctx, dot);
+      paintGrain(ctx, dot, dpr);
     }
     ctx.restore();
   }
@@ -755,14 +836,30 @@ export function draw(canvas, st) {
     const ly = p.y - midY;
     const lz = -(p.x - bx) * ws + p.z * wc;
     if (Math.abs(ly) < s.plateH / 2 && Math.abs(lz) < s.plateW / 2) continue;
-    paintGrain(ctx, dot);
+    paintGrain(ctx, dot, dpr);
   }
   ctx.restore();
 }
 
-/** Half a pixel along the motion, one pixel across. A square was as long as it was thick. */
-function paintGrain(ctx, dot) {
+/**
+ * A short streak along the wind. Size is a few centimetres of air, so a larger
+ * screen shows a larger grain. Under about two device pixels a rotated streak
+ * never lands on an iPad sample, so those draw as a square stamp instead.
+ */
+function paintGrain(ctx, dot, dpr) {
   const a = dot.q;
+  const along = dot.along || 1;
+  const across = dot.across || 1;
+  ctx.globalAlpha = dot.p.a * Math.min(1, 22 / dot.z);
+  const dpx = Math.max(along, across) * dpr;
+  if (dpx < 2.5) {
+    const s = Math.max(along, across, 2 / dpr);
+    const u = 1 / dpr;
+    const x = Math.round(a.x / u) * u;
+    const y = Math.round(a.y / u) * u;
+    ctx.fillRect(x, y, s, s);
+    return;
+  }
   const b = dot.back || a;
   let dx = a.x - b.x;
   let dy = a.y - b.y;
@@ -771,9 +868,8 @@ function paintGrain(ctx, dot) {
   dy /= len;
   const px = -dy;
   const py = dx;
-  const al = 0.25;
-  const ac = 0.5;
-  ctx.globalAlpha = dot.p.a * Math.min(1, 14 / dot.z);
+  const al = along / 2;
+  const ac = across / 2;
   ctx.beginPath();
   ctx.moveTo(a.x + dx * al + px * ac, a.y + dy * al + py * ac);
   ctx.lineTo(a.x + dx * al - px * ac, a.y + dy * al - py * ac);

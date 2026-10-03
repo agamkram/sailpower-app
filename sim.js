@@ -518,8 +518,27 @@ export function planInfo(s) {
 }
 
 /**
+ * Largest |watts| that lasts more than a single frame. The slew drive dumps its
+ * spin-up into one step, and that spike is not motoring, braking, or generation.
+ */
+function sustainedPeak(values) {
+  let peak = 0;
+  for (let i = 0; i < values.length; i++) {
+    const a = Math.abs(values[i]);
+    if (i > 0 && i + 1 < values.length) {
+      const neigh = Math.max(Math.abs(values[i - 1]), Math.abs(values[i + 1]));
+      if (a > neigh * 2 + 500) continue;
+    }
+    if (a > peak) peak = a;
+  }
+  return peak;
+}
+
+/**
  * One settled cycle, frame by frame, so it can be scrubbed by hand. Frames are
  * evenly spaced in time, which is what makes the slider linear to drag.
+ * `span` is the bar's full scale: that sustained peak, plus a thousand watts
+ * of room so the hardest stop in the cycle does not pin the meter.
  */
 export function sampleCycle(specs, maxFrames = 5000) {
   const dt = 0.02;
@@ -544,7 +563,8 @@ export function sampleCycle(specs, maxFrames = 5000) {
     step(st, dt);
   }
   if (frames.length < 2) return null;
-  return { frames, seconds: frames.length * dt };
+  const peak = sustainedPeak(frames.map((f) => f.inst));
+  return { frames, seconds: frames.length * dt, span: peak + 1000 };
 }
 
 /** Average net watts over steady cycles. Returns null if it never settles. */
