@@ -8,8 +8,8 @@ import {
   sampleCycle,
   solvePlan,
   step,
-} from "./sim.js?v=138";
-import { draw, bindCam } from "./view.js?v=138";
+} from "./sim.js?v=139";
+import { draw, bindCam } from "./view.js?v=139";
 
 // v3: the reference sail is 2.5×4 m on a 10 m track with a 0.5 s turn.
 // Saved v2 specs would put the old 5×2 m machine back on screen.
@@ -35,6 +35,11 @@ let postedW = 0;
 let postedV = 0;
 let postedJ = 0;
 let postedAt = 0;
+// Full-scale watts for the dial. The slider's top is the cycle peak plus a
+// thousand, and that is where the selection starts. The dial itself has no
+// extra room: the selected number is the end of the sweep.
+let dialScale = 2000;
+let dialTopSeen = 0;
 
 const $ = (id) => document.getElementById(id);
 
@@ -147,8 +152,30 @@ function clearScrub() {
   $("track-map").classList.remove("is-scrubbing");
 }
 
+function dialTop() {
+  const peak = cycle && cycle.span ? Math.max(0, cycle.span - 1000) : 0;
+  return Math.max(500, Math.round((peak + 1000) / 50) * 50);
+}
+
+function syncDialScale() {
+  const top = dialTop();
+  const input = $("dial-scale");
+  if (!input) return;
+  input.min = "200";
+  input.step = "50";
+  input.max = String(top);
+  if (top !== dialTopSeen) {
+    dialTopSeen = top;
+    dialScale = top;
+  }
+  dialScale = Math.min(top, Math.max(200, dialScale));
+  input.value = String(dialScale);
+  $("o-dial").textContent = Math.round(dialScale).toLocaleString("en-US") + " W";
+}
+
 function refreshSpan() {
   ensureCycle();
+  syncDialScale();
 }
 
 function scheduleSpan() {
@@ -235,14 +262,12 @@ function paintGauge() {
   ctx.clearRect(0, 0, w, h);
 
   const frames = cycle && cycle.frames;
-  let powerScale = 1500;
   let speedScale = Math.max(1, Math.abs(state.specs.wind), Math.abs(state.specs.vReturn || 0));
   if (frames && frames.length > 1) {
-    powerScale = Math.max(1, (cycle.span || 0) - 1000);
     for (const f of frames) speedScale = Math.max(speedScale, Math.abs(f.vx));
   }
   const r = Math.max(8, h / 2 - 3);
-  drawRoundDial(ctx, w / 2, h / 2, r, state.inst / powerScale, state.vx / speedScale);
+  drawRoundDial(ctx, w / 2, h / 2, r, state.inst / Math.max(1, dialScale), state.vx / speedScale);
 }
 
 /** Top half. -1 is left, 0 is up, 1 is right. */
@@ -455,6 +480,10 @@ $("solve").addEventListener("click", async () => {
     btn.textContent = "Solve";
     btn.disabled = false;
   }
+});
+$("dial-scale").addEventListener("input", () => {
+  dialScale = Number($("dial-scale").value);
+  $("o-dial").textContent = Math.round(dialScale).toLocaleString("en-US") + " W";
 });
 for (const id of FIELDS) {
   $(id).addEventListener("input", () => {
