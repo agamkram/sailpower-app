@@ -1,6 +1,6 @@
 /** Side view of the machine. Face-on sail is the thin plate. Edge-on sail faces the camera. */
 
-import { stroke } from "./sim.js?v=109";
+import { stroke } from "./sim.js?v=110";
 
 function sub(a, b) {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -51,11 +51,11 @@ const STOP = 0x6e1218;
 
 let followX = null;
 
-// Free-stream markers. Away from the sail they ride a uniform +x wind. At the
-// plate they ride a vortex wake: the face stops the air, the edges shed spin,
-// and that spin is what rolls the trail up. While the sim is running the
-// markers share its clock, including the rate button. While it is paused they
-// keep drifting on the wall clock so the slider still shows.
+// Free-stream markers. The model’s wind is a uniform flow along +x. Near the
+// sail the same plate the force model uses splits that flow: face-on, air is
+// pushed to the nearest edge and a slow wide trail follows; edge-on, the plate
+// blocks nothing. While the sim is running they share its clock, including the
+// rate button. While it is paused they keep drifting on the wall clock.
 const windParts = [];
 const windDraw = [];
 let windWall = 0;
@@ -93,200 +93,62 @@ function reseedWind(p, xLo, xHi, sailTop, atSail) {
   }
 }
 
-// Spinning filaments shed from the four edges. A filament is a segment of the
-// shear layer: position, unit tangent, signed circulation, core radius.
-const vortices = [];
-const MAX_VORT = 96;
-let shedCarry = 0;
-let shedPhase = 0;
-let wakeX = null;
-let wakeT = null;
-
-function clearWake() {
-  vortices.length = 0;
-  shedCarry = 0;
-  shedPhase = 0;
-}
-
-/** Velocity induced by every filament except `skip`. 2D kernel in the cross-section. */
-function induce(px, py, pz, skip) {
-  let vx = 0;
-  let vy = 0;
-  let vz = 0;
-  for (let i = 0; i < vortices.length; i++) {
-    if (i === skip) continue;
-    const v = vortices[i];
-    const rx = px - v.x;
-    const ry = py - v.y;
-    const rz = pz - v.z;
-    const along = rx * v.tx + ry * v.ty + rz * v.tz;
-    const edge = Math.abs(along) / v.halfLen;
-    if (edge > 2.4) continue;
-    const gate = edge <= 1 ? 1 : Math.max(0, 1 - (edge - 1) / 1.4);
-    const qx = rx - along * v.tx;
-    const qy = ry - along * v.ty;
-    const qz = rz - along * v.tz;
-    const r2 = qx * qx + qy * qy + qz * qz + v.core * v.core;
-    const s = (gate * v.circ) / (2 * Math.PI * r2);
-    vx += s * (v.ty * qz - v.tz * qy);
-    vy += s * (v.tz * qx - v.tx * qz);
-    vz += s * (v.tx * qy - v.ty * qx);
-  }
-  return [vx, vy, vz];
-}
-
-function stepWake(sail, wind, dt) {
-  const c = Math.cos(sail.yaw);
-  const sn = Math.sin(sail.yaw);
-  const block = Math.abs(c);
-  const Un = sail.U * c;
-  const speed = Math.abs(Un);
-  const hH = sail.halfH;
-  const hW = sail.halfW;
-  const H = 2 * hH;
-  const W = 2 * hW;
-  const core = Math.max(0.28, 0.2 * Math.min(H, W));
-  const wake = Math.sign(Un) || 1;
-  const toW = (lx, ly, lz) => [sail.bx + lx * c - lz * sn, sail.midY + ly, lx * sn + lz * c];
-  const rot = (x, y, z) => {
-    const L = Math.hypot(x, y, z) || 1;
-    return [(x * c - z * sn) / L, y / L, (x * sn + z * c) / L];
-  };
-
-  if (vortices.length > 1) {
-    const vel = new Array(vortices.length);
-    for (let i = 0; i < vortices.length; i++) {
-      const v = vortices[i];
-      const ind = induce(v.x, v.y, v.z, i);
-      // Face-on, the shear layer travels at about half the relative wind,
-      // so the rolls stay behind the plate and wrap up. Edge-on, leftover
-      // spin just blows away with the stream.
-      const shearX = sail.vx + 0.5 * (wind - sail.vx);
-      const conv = (wind + ind[0]) * (1 - block) + (shearX + ind[0]) * block;
-      vel[i] = [conv, ind[1], ind[2]];
-    }
-    const decay = Math.exp(-dt / 8);
-    for (let i = 0; i < vortices.length; i++) {
-      const v = vortices[i];
-      v.x += vel[i][0] * dt;
-      v.y += vel[i][1] * dt;
-      v.z += vel[i][2] * dt;
-      v.age += dt;
-      v.circ *= decay;
-    }
-  }
-
-  const spacing = Math.max(0.7, 0.42 * Math.min(H, W));
-  if (speed > 0.45 && vortices.length < MAX_VORT) {
-    shedCarry += speed * dt;
-    shedPhase += (2 * Math.PI * 0.15 * speed * dt) / Math.max(1, H);
-    let guard = 0;
-    while (shedCarry >= spacing && guard++ < 4 && vortices.length < MAX_VORT - 4) {
-      shedCarry -= spacing;
-      const gamma = 0.675 * speed * spacing;
-      const alt = Math.sin(shedPhase);
-      const alt2 = Math.sin(shedPhase + Math.PI / 2);
-      const off = core * 0.55;
-      const jit = () => (Math.random() - 0.5) * core * 0.4;
-      const add = (lx, ly, lz, tx, ty, tz, circ, halfLen) => {
-        const p = toW(lx, ly, lz);
-        const t = rot(tx, ty, tz);
-        vortices.push({
-          x: p[0],
-          y: p[1],
-          z: p[2],
-          tx: t[0],
-          ty: t[1],
-          tz: t[2],
-          circ,
-          core,
-          halfLen,
-          age: 0,
-        });
-      };
-      const top = gamma * (0.7 + 0.3 * alt);
-      const bot = gamma * (0.7 - 0.3 * alt);
-      const sP = gamma * 0.75 * (0.7 + 0.3 * alt2);
-      const sN = gamma * 0.75 * (0.7 - 0.3 * alt2);
-      // Top edge is clockwise, bottom counter-clockwise, so the street
-      // between them is slow and rolling. The side edges use the sign that
-      // makes the shadow a deficit instead of a jet.
-      add(wake * off + jit(), hH + jit() * 0.2, jit(), 0, 0, 1, -top, hW);
-      add(wake * off + jit(), -hH + jit() * 0.2, jit(), 0, 0, 1, bot, hW);
-      add(wake * off + jit(), jit(), hW, 0, 1, 0, sP, hH);
-      add(wake * off + jit(), jit(), -hW, 0, 1, 0, -sN, hH);
-    }
-  }
-
-  let w = 0;
-  const reach = 6.5 * Math.max(H, W);
-  for (let i = 0; i < vortices.length; i++) {
-    const v = vortices[i];
-    if (v.age > 8 || Math.abs(v.circ) < 0.25) continue;
-    if (Math.abs(v.x - sail.bx) > reach) continue;
-    vortices[w++] = v;
-  }
-  vortices.length = w;
-  while (vortices.length > MAX_VORT) vortices.shift();
-}
-
 /**
- * The face stops air. Only the normal component is removed, and only in
- * front of the plate, so the grains are not pushed sideways by a rule.
- * The filaments do the leaving. Upstream air is not allowed to reverse;
- * recirculation stays in the wake.
+ * Extra velocity so the free stream does not pass through the plate.
+ * Face-on, air headed at the sail is pushed to the nearest edge and a
+ * slow trail follows, wide and long the way a flat plate's wake is.
+ * Edge-on, the plate blocks nothing. Same plate the force model uses.
  */
-function faceStop(p, sail, wind) {
+function sailWash(p, sail) {
   const c = Math.cos(sail.yaw);
-  const sn = Math.sin(sail.yaw);
+  const s = Math.sin(sail.yaw);
   const dx = p.x - sail.bx;
-  const lx = dx * c + p.z * sn;
+  const lx = dx * c + p.z * s;
   const ly = p.y - sail.midY;
-  const lz = -dx * sn + p.z * c;
-  const Un = sail.U * c;
-  if (Math.abs(Un) < 0.25) return;
-  const up = Math.sign(Un) || 1;
-  const front = -lx * up;
-  if (Math.abs(ly) >= sail.halfH || Math.abs(lz) >= sail.halfW) return;
-  const reach = 0.42 * Math.min(sail.halfH, sail.halfW);
-  if (front > reach || front < -0.05) return;
-  const gain = front <= 0 ? 1 : 1 - front / reach;
-  const nx = -up * c;
-  const nz = -up * sn;
-  const relx = wind + p.ox - sail.vx;
-  const rn = relx * nx + p.oz * nz;
-  if (rn < 0) {
-    p.ox -= gain * rn * nx;
-    p.oz -= gain * rn * nz;
+  const lz = -dx * s + p.z * c;
+  const block = Math.abs(c);
+  const U = sail.U;
+  if (block < 0.04 || Math.abs(U) < 0.15) return [0, 0, 0];
+  const reach = 1.15 * Math.max(sail.halfH, sail.halfW);
+  const up = Math.sign(U * c) || 1;
+  const upstream = -lx * up;
+  const ny = Math.abs(ly) / sail.halfH;
+  const nz = Math.abs(lz) / sail.halfW;
+  const cover = Math.max(ny, nz);
+  let vy = 0;
+  let vzL = 0;
+  let slow = 0;
+  if (upstream > -0.2 && upstream < reach && cover < 1.4) {
+    const near = Math.max(0, 1 - upstream / reach);
+    const spill = Math.max(0, 1.2 - cover);
+    const push = block * near * near * spill * Math.abs(U);
+    const roomY = sail.halfH - Math.abs(ly);
+    const roomZ = sail.halfW - Math.abs(lz);
+    if (roomY < roomZ) vy = (ly < 0 ? -1 : 1) * push;
+    else vzL = (lz < 0 ? -1 : 1) * push;
+    slow = block * near * Math.max(0, 1 - cover) * Math.abs(U) * 0.75;
   }
-  const downx = up * c;
-  const downz = up * sn;
-  const vDown = (wind + p.ox) * downx + p.oz * downz;
-  const pDown = sail.vx * downx;
-  if (vDown < pDown) {
-    const fix = (pDown - vDown) * gain;
-    p.ox += fix * downx;
-    p.oz += fix * downz;
+  // The first trail died within about one sail-height and also flung air
+  // outward. A flat plate's shadow stays slow and a bit wider than the plate
+  // for several heights. No swirl: that read as fluff.
+  const down = -upstream;
+  const height = 2 * Math.max(sail.halfH, sail.halfW);
+  const wakeLen = 2.6 * height;
+  if (down > 0 && down < wakeLen) {
+    const fade = (1 - down / wakeLen) ** 1.15;
+    const spread = 1.02 + 0.45 * (down / height);
+    if (cover < spread) {
+      const inside = Math.max(0, 1 - cover / spread);
+      slow += block * fade * inside * Math.abs(U) * 0.72;
+      const widen = block * fade * Math.abs(U) * 0.05;
+      vy += (ly < 0 ? -1 : 1) * widen;
+      vzL += (lz < 0 ? -1 : 1) * widen;
+    }
   }
+  const flow = Math.sign(U) || 1;
+  return [-slow * flow - vzL * s, vy, vzL * c];
 }
 
-/** A grain that stepped through the plate goes back to the upstream face. */
-function keepOffPlate(p, sail) {
-  const c = Math.cos(sail.yaw);
-  const sn = Math.sin(sail.yaw);
-  const dx = p.x - sail.bx;
-  const lx = dx * c + p.z * sn;
-  const ly = p.y - sail.midY;
-  const lz = -dx * sn + p.z * c;
-  if (Math.abs(c) < 0.08) return;
-  const up = Math.sign(sail.U * c) || 1;
-  const front = -lx * up;
-  if (front > 0.02 || front < -0.06) return;
-  if (Math.abs(ly) >= sail.halfH || Math.abs(lz) >= sail.halfW) return;
-  const lx2 = -0.025 * up;
-  p.x = sail.bx + lx2 * c - lz * sn;
-  p.z = lx2 * sn + lz * c;
-}
 
 const CAM0 = {
   yaw: Math.atan2(-1.7, 7.78),
@@ -896,35 +758,39 @@ export function draw(canvas, st) {
       halfH: s.plateH / 2,
       halfW: s.plateW / 2,
       U: speed - st.vx,
-      vx: st.vx,
     };
-    if (wakeT != null && st.time + 0.05 < wakeT) clearWake();
-    if (wakeX != null && Math.abs(bx - wakeX) > Math.max(1.5, Math.abs(st.vx) * dt + 0.6)) clearWake();
-    wakeX = bx;
-    wakeT = st.time;
-    stepWake(sail, speed, dt);
     windDraw.length = 0;
     for (let i = 0; i < count; i++) {
       const p = windParts[i];
-      const ind = induce(p.x, p.y, p.z, -1);
-      let ox = ind[0];
-      let oy = ind[1];
-      let oz = ind[2];
-      const sp = Math.hypot(ox, oy, oz);
-      if (sp > 18) {
-        const k = 18 / sp;
-        ox *= k;
-        oy *= k;
-        oz *= k;
-      }
-      p.ox = ox;
-      p.oy = oy;
-      p.oz = oz;
-      faceStop(p, sail, speed);
+      const wash = sailWash(p, sail);
+      p.ox += (wash[0] - (p.ox || 0)) * 0.55;
+      p.oy += (wash[1] - (p.oy || 0)) * 0.55;
+      p.oz += (wash[2] - (p.oz || 0)) * 0.55;
       p.x += (speed + p.ox) * dt;
       p.y += p.oy * dt;
       p.z += p.oz * dt;
-      keepOffPlate(p, sail);
+      // A step can jump the thin plate. Put that air out at the nearest edge.
+      if (Math.abs(Math.cos(yaw)) > 0.2) {
+        const c = Math.cos(yaw);
+        const sn = Math.sin(yaw);
+        const dx = p.x - bx;
+        const lx = dx * c + p.z * sn;
+        const ly = p.y - midY;
+        const lz = -dx * sn + p.z * c;
+        const hH = s.plateH / 2;
+        const hW = s.plateW / 2;
+        if (Math.abs(lx) < 0.25 && Math.abs(ly) < hH && Math.abs(lz) < hW) {
+          const up = Math.sign(sail.U * c) || 1;
+          let ly2 = ly;
+          let lz2 = lz;
+          if (hH - Math.abs(ly) < hW - Math.abs(lz)) ly2 = (ly < 0 ? -1 : 1) * (hH + 0.18);
+          else lz2 = (lz < 0 ? -1 : 1) * (hW + 0.18);
+          const lx2 = -0.06 * up;
+          p.x = bx + lx2 * c - lz2 * sn;
+          p.y = midY + ly2;
+          p.z = lx2 * sn + lz2 * c;
+        }
+      }
       if (p.x > xHi || p.x < xLo || p.y > sailAir + 2.4 || p.y < 0.15) {
         reseedWind(p, xLo, xHi, sailAir, i % 2 === 0);
       }
