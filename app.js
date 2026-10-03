@@ -8,8 +8,8 @@ import {
   sampleCycle,
   solvePlan,
   step,
-} from "./sim.js?v=126";
-import { draw, bindCam } from "./view.js?v=126";
+} from "./sim.js?v=128";
+import { draw, bindCam } from "./view.js?v=128";
 
 // v3: the reference sail is 2.5×4 m on a 10 m track with a 0.5 s turn.
 // Saved v2 specs would put the old 5×2 m machine back on screen.
@@ -20,7 +20,6 @@ let specs = loadSpecs();
 let state = createState(specs);
 let running = false;
 let last = 0;
-let powerScale = 1500;
 let spanTimer = 0;
 // One settled cycle, cached, so the scrubber has something to slide along.
 let cycle = null;
@@ -138,15 +137,8 @@ function clearScrub() {
   $("track-map").classList.remove("is-scrubbing");
 }
 
-function ceiling(s) {
-  const eta = Math.min(0.99, Math.max(0.2, s.eta ?? 0.95));
-  const v = Math.max(1, Math.abs(s.vReturn), Math.abs(s.wind * (s.outFrac || 0)));
-  return (Math.max(200, s.fMax) * v) / eta + 1000;
-}
-
 function refreshSpan() {
-  const c = ensureCycle();
-  powerScale = c ? c.span : 1000;
+  ensureCycle();
 }
 
 function scheduleSpan() {
@@ -179,18 +171,6 @@ function paint() {
     const avg = avgWatts(state);
     $("substat").textContent = avg == null ? "" : Math.round(avg) + " W avg";
   }
-  const span = powerScale;
-  const pct = Math.max(-50, Math.min(50, (state.inst / span) * 50));
-  const fill = $("pfill");
-  if (pct >= 0) {
-    fill.style.left = "50%";
-    fill.style.width = pct + "%";
-    fill.style.background = "var(--green)";
-  } else {
-    fill.style.left = 50 + pct + "%";
-    fill.style.width = -pct + "%";
-    fill.style.background = "var(--amber)";
-  }
   let frac;
   if (scrub != null) frac = scrub;
   else if (dur > 0) frac = Math.min(1, state.cycleT / dur);
@@ -198,7 +178,64 @@ function paint() {
   const pctAlong = Math.max(0, Math.min(100, frac * 100));
   $("map-dot").style.left = pctAlong + "%";
   $("track-map").setAttribute("aria-valuenow", Math.round(pctAlong));
+  paintGauge(frac);
   draw($("view"), state);
+}
+
+/** One settled cycle. Green is power made, amber is power spent. The line is now. */
+function paintGauge(frac) {
+  const canvas = $("gauge");
+  if (!canvas) return;
+  const dpr = Math.max(2, Math.min(3, window.devicePixelRatio || 1));
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
+  if (w < 2 || h < 2) return;
+  const pw = Math.floor(w * dpr);
+  const ph = Math.floor(h * dpr);
+  if (canvas.width !== pw || canvas.height !== ph) {
+    canvas.width = pw;
+    canvas.height = ph;
+  }
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  const mid = h / 2;
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.28)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, mid);
+  ctx.lineTo(w, mid);
+  ctx.stroke();
+
+  const frames = cycle && cycle.frames;
+  if (frames && frames.length > 1) {
+    const scale = Math.max(1, (cycle.span || 0) - 1000);
+    const yOf = (inst) => mid - Math.max(-1, Math.min(1, inst / scale)) * (mid - 1);
+    const area = (above) => {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, above ? 0 : mid, w, mid);
+      ctx.clip();
+      ctx.beginPath();
+      ctx.moveTo(0, mid);
+      for (let i = 0; i < frames.length; i++) {
+        ctx.lineTo((i / (frames.length - 1)) * w, yOf(frames[i].inst));
+      }
+      ctx.lineTo(w, mid);
+      ctx.closePath();
+      ctx.fillStyle = above ? "rgba(52, 211, 153, 0.9)" : "rgba(251, 191, 36, 0.92)";
+      ctx.fill();
+      ctx.restore();
+    };
+    area(true);
+    area(false);
+    const x = Math.max(0, Math.min(1, frac)) * w;
+    ctx.strokeStyle = "rgba(232, 237, 244, 0.95)";
+    ctx.beginPath();
+    ctx.moveTo(x, 1);
+    ctx.lineTo(x, h - 1);
+    ctx.stroke();
+  }
 }
 
 function frame(t) {
@@ -348,7 +385,6 @@ for (const id of FIELDS) {
     paintForm();
     specs = readForm();
     dropCycle();
-    powerScale = Math.max(powerScale, ceiling(specs));
     scheduleSpan();
     const next = createState(specs);
     if (running) state.specs = next.specs;

@@ -185,23 +185,20 @@ header h1 {
 
 .lower {
   flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
-}
-
-/* The picture used to stop here. This is the height the bar gave up. */
-.lower-open {
-  flex: 0 0 auto;
-  height: 4.89rem;
-}
-
-.deck {
-  flex: 0 0 auto;
   display: grid;
   grid-template-columns: 2fr 1fr;
   gap: 0.5rem;
-  align-items: end;
+  align-items: start;
   padding-bottom: max(0.35rem, var(--safe-b));
+}
+
+.gauge {
+  display: block;
+  width: 100%;
+  height: 4.89rem;
+  border-radius: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
 }
 
 .deck-main {
@@ -227,34 +224,6 @@ header h1 {
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-size: 0.72rem;
   color: var(--text);
-}
-
-.pbar {
-  position: relative;
-  flex: 1 1 auto;
-  min-width: 0;
-  height: 14px;
-  border-radius: 99px;
-  background: var(--surface-2);
-  overflow: hidden;
-  border: 1px solid var(--border);
-}
-
-.pbar-zero {
-  position: absolute;
-  left: 50%;
-  top: 0;
-  bottom: 0;
-  width: 1px;
-  background: rgba(255, 255, 255, 0.35);
-}
-
-.pbar-fill {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 0;
-  background: var(--green);
 }
 
 .watts, .net {

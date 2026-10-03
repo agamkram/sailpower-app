@@ -86,7 +86,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=IBM+Plex+Mono:wght@500;600&family=Michroma&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=127" />
+  <link rel="stylesheet" href="styles.css?v=128" />
 </head>
 <body>
   <div class="fit-stage" id="fit-stage">
@@ -105,15 +105,10 @@
       </div>
 
       <div class="lower">
-      <div class="lower-open"></div>
-      <section class="deck">
         <div class="deck-main" aria-live="polite">
+          <canvas id="gauge" class="gauge" aria-hidden="true"></canvas>
           <div class="phase-row">
             <span class="speed" id="speed">0.0 m/s</span>
-            <div class="pbar" id="pbar" aria-hidden="true">
-              <div class="pbar-zero"></div>
-              <div class="pbar-fill" id="pfill"></div>
-            </div>
             <span class="watts" id="watts">0 W</span>
           </div>
           <div class="net-row">
@@ -127,7 +122,6 @@
           </div>
         </div>
         <div class="deck-aside"></div>
-      </section>
       </div>
 
       <form class="sheet" id="sheet" hidden>
@@ -179,6 +173,6 @@
       </form>
     </div>
   </div>
-  <script type="module" src="app.js?v=127"></script>
+  <script type="module" src="app.js?v=128"></script>
 </body>
 </html>
