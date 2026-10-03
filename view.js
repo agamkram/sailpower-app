@@ -1,6 +1,6 @@
 /** Side view of the machine. Face-on sail is the thin plate. Edge-on sail faces the camera. */
 
-import { stroke } from "./sim.js?v=117";
+import { stroke } from "./sim.js?v=119";
 
 function sub(a, b) {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -78,17 +78,42 @@ function windDt(st) {
   return wall;
 }
 
-function reseedWind(p, xLo, xHi, sailTop, atSail, inlet) {
+/** Where the plate actually moves the air: just upstream, the wake, and the rim. */
+function airBox(band, bx) {
+  const R = Math.max(band.halfW, band.halfH, 0.4);
+  return {
+    x0: bx - R * 1.35,
+    x1: bx + R * 2.6,
+    zHalf: band.halfW + 0.45,
+    y0: Math.max(0.25, band.midY - band.halfH - 0.2),
+    y1: band.midY + band.halfH + 0.55,
+  };
+}
+
+function reseedWind(p, band, bx, inlet) {
   p.ox = 0;
   p.oy = 0;
   p.oz = 0;
   p.a = 0.35 + Math.random() * 0.4;
-  p.y = 0.4 + Math.random() * (sailTop + 1.1);
-  p.z = (Math.random() - 0.5) * (atSail ? 4.4 : 9);
-  // Leaving the frame comes back in at the upstream edge, the way a tracer
-  // would. Scattering the replacement through the volume fed the slow wake.
-  p.x = inlet ? xLo : xLo + Math.random() * Math.max(1, xHi - xLo);
-  if (atSail) p.y = 0.7 + Math.random() * Math.max(0.5, sailTop - 0.4);
+  // A corridor the length of the track and several times wider than the sail
+  // was free stream the plate never touches. Looking through it hid the air
+  // the machine actually moves.
+  const box = airBox(band, bx);
+  p.z = (Math.random() - 0.5) * 2 * box.zHalf;
+  p.y = box.y0 + Math.random() * Math.max(0.4, box.y1 - box.y0);
+  p.x = inlet ? box.x0 : box.x0 + Math.random() * Math.max(0.4, box.x1 - box.x0);
+}
+
+/** Left the region the sail can influence. */
+function outsideAir(p, band, bx) {
+  const box = airBox(band, bx);
+  return (
+    p.x < box.x0 - 0.15 ||
+    p.x > box.x1 + 0.35 ||
+    Math.abs(p.z) > box.zHalf + 0.7 ||
+    p.y > box.y1 + 0.45 ||
+    p.y < box.y0 - 0.35
+  );
 }
 
 /**
@@ -871,19 +896,18 @@ export function draw(canvas, st) {
     ctx.fill();
   }
 
-  // Grains fill the framed track. A circle reads as a ball, so these stay square.
+  // Grains stay with the sail. A circle reads as a ball, so these stay square.
   {
     const dt = windDt(st);
     const speed = Math.max(0, s.wind);
-    const sailAir = py1;
-    const xLo = rail0 - 1;
-    const xHi = rail1 + 1;
-    const count = Math.min(2200, Math.round(Math.max(8, xHi - xLo) * 90));
+    const band = { halfW: s.plateW / 2, halfH: s.plateH / 2, midY };
+    const count = Math.min(1400, Math.round(Math.max(6, band.halfW + band.halfH) * 280));
     while (windParts.length < count) {
       const p = { x: 0, y: 0, z: 0, ox: 0, oy: 0, oz: 0, a: 0.5 };
-      reseedWind(p, xLo, xHi, sailAir, windParts.length % 2 === 0);
+      reseedWind(p, band, bx);
       windParts.push(p);
     }
+    if (windParts.length > count) windParts.length = count;
     windClock += dt;
     const sail = {
       bx,
@@ -906,9 +930,7 @@ export function draw(canvas, st) {
       p.y += p.oy * dt;
       p.z += p.oz * dt;
       holdOffPlate(p, sail);
-      if (p.x > xHi || p.x < xLo || p.y > sailAir + 2.4 || p.y < 0.15) {
-        reseedWind(p, xLo, xHi, sailAir, false, true);
-      }
+      if (outsideAir(p, band, bx)) reseedWind(p, band, bx, true);
       const q = project([p.x, p.y, p.z]);
       if (!q || q.z < 0.4) continue;
       windDraw.push({ p, q, z: q.z });
