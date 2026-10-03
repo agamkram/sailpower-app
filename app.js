@@ -8,8 +8,8 @@ import {
   sampleCycle,
   solvePlan,
   step,
-} from "./sim.js?v=133";
-import { draw, bindCam } from "./view.js?v=133";
+} from "./sim.js?v=135";
+import { draw, bindCam } from "./view.js?v=135";
 
 // v3: the reference sail is 2.5×4 m on a 10 m track with a 0.5 s turn.
 // Saved v2 specs would put the old 5×2 m machine back on screen.
@@ -25,6 +25,16 @@ let spanTimer = 0;
 let cycle = null;
 let cycleKey = "";
 let scrub = null;
+// Shown numbers ease, then hold. A ramp would still march the digits if they
+// only lagged. The needle stays live.
+let shownW = 0;
+let shownV = 0;
+let shownJ = 0;
+let shownAt = 0;
+let postedW = 0;
+let postedV = 0;
+let postedJ = 0;
+let postedAt = 0;
 
 const $ = (id) => document.getElementById(id);
 
@@ -157,19 +167,38 @@ function fmtKJ(j) {
   return sign + (j / 1000).toFixed(2) + " kJ";
 }
 
+function ease(cur, target, dt, tau) {
+  if (!(dt > 0)) return target;
+  const a = 1 - Math.exp(-dt / tau);
+  return cur + (target - cur) * a;
+}
+
 function paint() {
-  $("speed").textContent = state.vx.toFixed(1) + " m/s";
-  $("watts").textContent = fmtW(state.inst);
-  $("watts").style.color = state.inst >= 0 ? "var(--green)" : "var(--amber)";
+  const now = performance.now() / 1000;
+  const dt = shownAt ? Math.min(0.1, now - shownAt) : 0.016;
+  shownAt = now;
+  shownW = ease(shownW, state.inst, dt, 0.3);
+  shownV = ease(shownV, state.vx, dt, 0.3);
   const net = netOf(state);
+  if (scrub == null) shownJ = ease(shownJ, net, dt, 0.3);
   const dur = cycle ? cycle.seconds : state.lastCycleS;
-  if (scrub != null) {
-    $("net").textContent = (scrub * dur).toFixed(2) + " s";
-    $("substat").textContent = "";
-  } else {
-    $("net").textContent = "net " + fmtKJ(net);
-    const avg = avgWatts(state);
-    $("substat").textContent = avg == null ? "" : Math.round(avg) + " W avg";
+  const post = scrub != null || now - postedAt >= 0.35;
+  if (post) {
+    postedAt = now;
+    postedW = shownW;
+    postedV = shownV;
+    postedJ = shownJ;
+    $("speed").textContent = postedV.toFixed(1) + " m/s";
+    $("watts").textContent = fmtW(postedW);
+    $("watts").style.color = postedW >= 0 ? "var(--green)" : "var(--amber)";
+    if (scrub != null) {
+      $("net").textContent = (scrub * dur).toFixed(2) + " s";
+      $("substat").textContent = "";
+    } else {
+      $("net").textContent = "net " + fmtKJ(postedJ);
+      const avg = avgWatts(state);
+      $("substat").textContent = avg == null ? "" : Math.round(avg) + " W avg";
+    }
   }
   let frac;
   if (scrub != null) frac = scrub;
