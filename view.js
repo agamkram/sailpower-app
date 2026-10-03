@@ -1,6 +1,6 @@
 /** Side view of the machine. Face-on sail is the thin plate. Edge-on sail faces the camera. */
 
-import { stroke } from "./sim.js?v=106";
+import { stroke } from "./sim.js?v=108";
 
 function sub(a, b) {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -93,11 +93,10 @@ function reseedWind(p, xLo, xHi, sailTop, atSail) {
 }
 
 /**
- * Extra velocity so the free stream does not pass through the plate.
- * Face-on, air headed at the sail is pushed to the nearest edge and a
- * slower wake trails behind. Edge-on, the plate blocks nothing and the
- * extra velocity is zero. This is the same plate the force model uses,
- * drawn as a kinematic split, not a solved flow field.
+ * Extra velocity around the plate. The free stream is still a uniform +x flow.
+ * What changes near the sail is the same blockage the force model uses:
+ * face-on, air slows into a cushion, slides out along the face, and leaves a
+ * slow wake; edge-on, the plate is too thin to matter. Not a solved flow field.
  */
 function sailWash(p, sail) {
   const c = Math.cos(sail.yaw);
@@ -108,35 +107,78 @@ function sailWash(p, sail) {
   const lz = -dx * s + p.z * c;
   const block = Math.abs(c);
   const U = sail.U;
-  if (block < 0.04 || Math.abs(U) < 0.15) return [0, 0, 0];
-  const reach = 1.15 * Math.max(sail.halfH, sail.halfW);
+  const speed = Math.abs(U);
+  if (block < 0.05 || speed < 0.2) return [0, 0, 0];
   const up = Math.sign(U * c) || 1;
-  const upstream = -lx * up;
-  const ny = Math.abs(ly) / sail.halfH;
-  const nz = Math.abs(lz) / sail.halfW;
-  const cover = Math.max(ny, nz);
+  const front = -lx * up;
+  const hH = Math.max(0.15, sail.halfH);
+  const hW = Math.max(0.15, sail.halfW);
+  const ey = ly / hH;
+  const ez = lz / hW;
+  const radial = Math.hypot(ey, ez);
+  const R = Math.min(hH, hW);
+  const flow = Math.sign(U) || 1;
+  let slow = 0;
   let vy = 0;
   let vzL = 0;
-  let slow = 0;
-  if (upstream > -0.2 && upstream < reach && cover < 1.4) {
-    const near = Math.max(0, 1 - upstream / reach);
-    const spill = Math.max(0, 1.2 - cover);
-    const push = block * near * near * spill * Math.abs(U);
-    const roomY = sail.halfH - Math.abs(ly);
-    const roomZ = sail.halfW - Math.abs(lz);
-    if (roomY < roomZ) vy = (ly < 0 ? -1 : 1) * push;
-    else vzL = (lz < 0 ? -1 : 1) * push;
-    slow = block * near * Math.max(0, 1 - cover) * Math.abs(U) * 0.75;
+
+  // Cushion. On the centerline the air comes to the plate's own speed.
+  // Toward the rim it keeps moving and slips off along the face. The middle
+  // used to be thrown sideways hardest, which is the opposite of a stagnation
+  // point.
+  const buf = 0.9 * R;
+  if (front > -0.02 && front < buf && radial < 1.35) {
+    const approach = (1 - Math.max(0, front) / buf) ** 2;
+    const core = Math.max(0, 1 - radial * 0.72);
+    slow = speed * block * approach * (0.25 + 0.75 * core);
+    const face = Math.max(0, 1 - Math.max(0, front) / (0.4 * R));
+    const edgeFade = radial > 1 ? Math.max(0, (1.35 - radial) / 0.35) : 1;
+    const mag = speed * block * face * face * Math.max(radial, 0.14) * 0.5 * edgeFade;
+    let dirY = ey;
+    let dirZ = ez;
+    if (Math.hypot(dirY, dirZ) < 0.14) {
+      dirY = ly >= 0 ? 0.14 : -0.14;
+      dirZ = lz >= 0 ? 0.05 : -0.05;
+    }
+    const dir = Math.hypot(dirY, dirZ) || 1;
+    vy = (dirY / dir) * mag;
+    vzL = (dirZ / dir) * mag;
   }
-  const down = -upstream;
-  if (down > 0 && down < reach * 1.5 && cover < 1.05) {
-    const fade = Math.max(0, 1 - down / (reach * 1.5));
-    slow += block * fade * Math.abs(U) * 0.6;
-    vy += (ly < 0 ? -1 : 1) * block * fade * Math.abs(U) * 0.18;
-    vzL += (lz < 0 ? -1 : 1) * block * fade * Math.abs(U) * 0.18;
+
+  // Separated wake. Slower than the free stream, a little wider than the
+  // plate, and it does not keep flinging air outward.
+  const back = -front;
+  const span = Math.max(hH, hW);
+  const wake = 2.4 * span;
+  if (back > 0.02 && back < wake) {
+    const spread = 1 + 0.2 * (back / span);
+    if (radial < spread) {
+      const fade = (1 - back / wake) ** 1.35;
+      const inside = Math.max(0, 1 - radial / spread);
+      slow += speed * block * 0.62 * fade * inside;
+    }
   }
-  const flow = Math.sign(U) || 1;
+
+  slow = Math.min(slow, speed * block);
   return [-slow * flow - vzL * s, vy, vzL * c];
+}
+
+/** A grain that stepped through the plate goes back to the upstream face. */
+function keepOffPlate(p, sail) {
+  const c = Math.cos(sail.yaw);
+  const s = Math.sin(sail.yaw);
+  const dx = p.x - sail.bx;
+  const lx = dx * c + p.z * s;
+  const ly = p.y - sail.midY;
+  const lz = -dx * s + p.z * c;
+  if (Math.abs(c) < 0.08) return;
+  const up = Math.sign(sail.U * c) || 1;
+  const front = -lx * up;
+  if (front > 0.02 || front < -0.06) return;
+  if (Math.abs(ly) >= sail.halfH || Math.abs(lz) >= sail.halfW) return;
+  const lx2 = -0.025 * up;
+  p.x = sail.bx + lx2 * c - lz * s;
+  p.z = lx2 * s + lz * c;
 }
 
 const CAM0 = {
@@ -752,54 +794,19 @@ export function draw(canvas, st) {
     for (let i = 0; i < count; i++) {
       const p = windParts[i];
       const wash = sailWash(p, sail);
-      p.ox += (wash[0] - (p.ox || 0)) * 0.55;
-      p.oy += (wash[1] - (p.oy || 0)) * 0.55;
-      p.oz += (wash[2] - (p.oz || 0)) * 0.55;
+      p.ox += (wash[0] - (p.ox || 0)) * 0.62;
+      p.oy += (wash[1] - (p.oy || 0)) * 0.62;
+      p.oz += (wash[2] - (p.oz || 0)) * 0.62;
       p.x += (speed + p.ox) * dt;
       p.y += p.oy * dt;
       p.z += p.oz * dt;
-      // A step can jump the thin plate. Put that air out at the nearest edge.
-      if (Math.abs(Math.cos(yaw)) > 0.2) {
-        const c = Math.cos(yaw);
-        const sn = Math.sin(yaw);
-        const dx = p.x - bx;
-        const lx = dx * c + p.z * sn;
-        const ly = p.y - midY;
-        const lz = -dx * sn + p.z * c;
-        const hH = s.plateH / 2;
-        const hW = s.plateW / 2;
-        if (Math.abs(lx) < 0.25 && Math.abs(ly) < hH && Math.abs(lz) < hW) {
-          const up = Math.sign(sail.U * c) || 1;
-          let ly2 = ly;
-          let lz2 = lz;
-          if (hH - Math.abs(ly) < hW - Math.abs(lz)) ly2 = (ly < 0 ? -1 : 1) * (hH + 0.18);
-          else lz2 = (lz < 0 ? -1 : 1) * (hW + 0.18);
-          const lx2 = -0.06 * up;
-          p.x = bx + lx2 * c - lz2 * sn;
-          p.y = midY + ly2;
-          p.z = lx2 * sn + lz2 * c;
-        }
-      }
+      keepOffPlate(p, sail);
       if (p.x > xHi || p.x < xLo || p.y > sailAir + 2.4 || p.y < 0.15) {
         reseedWind(p, xLo, xHi, sailAir, i % 2 === 0);
       }
       const q = project([p.x, p.y, p.z]);
       if (!q || q.z < 0.4) continue;
-      const back = project([
-        p.x - (speed + p.ox) * 0.01,
-        p.y - p.oy * 0.01,
-        p.z - p.oz * 0.01,
-      ]);
-      const minCss = 2 / dpr;
-      const pxPerM = cam.fLen / Math.max(0.5, q.z);
-      windDraw.push({
-        p,
-        q,
-        back,
-        z: q.z,
-        along: Math.max(minCss, 0.015 * pxPerM),
-        across: Math.max(minCss, 0.03 * pxPerM),
-      });
+      windDraw.push({ p, q, z: q.z });
     }
     ctx.save();
     ctx.fillStyle = "rgb(214, 230, 240)";
@@ -842,40 +849,19 @@ export function draw(canvas, st) {
 }
 
 /**
- * A short streak along the wind. Size is a few centimetres of air, so a larger
- * screen shows a larger grain. Under about two device pixels a rotated streak
- * never lands on an iPad sample, so those draw as a square stamp instead.
+ * One mark on every screen: one CSS pixel, and never under two device pixels,
+ * so a Retina Mac stays a speck and an iPad still lands on a real sample.
+ * A rotated streak at this size becomes a blob on some screens and nothing
+ * on others, so the mark is a square snapped to the pixel grid.
  */
 function paintGrain(ctx, dot, dpr) {
   const a = dot.q;
-  const along = dot.along || 1;
-  const across = dot.across || 1;
-  ctx.globalAlpha = dot.p.a * Math.min(1, 22 / dot.z);
-  const dpx = Math.max(along, across) * dpr;
-  if (dpx < 2.5) {
-    const s = Math.max(along, across, 2 / dpr);
-    const u = 1 / dpr;
-    const x = Math.round(a.x / u) * u;
-    const y = Math.round(a.y / u) * u;
-    ctx.fillRect(x, y, s, s);
-    return;
-  }
-  const b = dot.back || a;
-  let dx = a.x - b.x;
-  let dy = a.y - b.y;
-  const len = Math.hypot(dx, dy) || 1;
-  dx /= len;
-  dy /= len;
-  const px = -dy;
-  const py = dx;
-  const al = along / 2;
-  const ac = across / 2;
-  ctx.beginPath();
-  ctx.moveTo(a.x + dx * al + px * ac, a.y + dy * al + py * ac);
-  ctx.lineTo(a.x + dx * al - px * ac, a.y + dy * al - py * ac);
-  ctx.lineTo(a.x - dx * al - px * ac, a.y - dy * al - py * ac);
-  ctx.lineTo(a.x - dx * al + px * ac, a.y - dy * al + py * ac);
-  ctx.fill();
+  const u = 1 / dpr;
+  const px = Math.max(1, 2 / dpr);
+  ctx.globalAlpha = dot.p.a * Math.min(1, 14 / dot.z);
+  const x = Math.round(a.x / u) * u;
+  const y = Math.round(a.y / u) * u;
+  ctx.fillRect(x, y, px, px);
 }
 
 
