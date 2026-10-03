@@ -1,6 +1,6 @@
 /** Side view of the machine. Face-on sail is the thin plate. Edge-on sail faces the camera. */
 
-import { stroke } from "./sim.js?v=135";
+import { stroke } from "./sim.js?v=136";
 
 function sub(a, b) {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -267,6 +267,49 @@ export function resetCam() {
   camCtl.pitch = CAM0.pitch;
 }
 
+/**
+ * Screen y of the horizon. The camera stays upright, so this is a level line:
+ * above the middle when the view looks down, below it when the view looks up.
+ */
+function horizonY(cam) {
+  const z = cam.zaxis;
+  const gx = -z[0];
+  const gz = -z[2];
+  const hlen = Math.hypot(gx, gz);
+  if (hlen < 1e-3) return -z[1] > 0 ? cam.h + 8 : -8;
+  const H = [gx / hlen, 0, gz / hlen];
+  const camUp = H[0] * cam.yaxis[0] + H[1] * cam.yaxis[1] + H[2] * cam.yaxis[2];
+  const camFwd = -(H[0] * z[0] + H[1] * z[1] + H[2] * z[2]);
+  if (camFwd < 1e-3) return cam.h + 8;
+  return cam.h / 2 - (camUp / camFwd) * cam.fLen;
+}
+
+/** Flat ground on y = 0, sky above the horizon. Neither knows about the screen. */
+function paintWorld(ctx, cam) {
+  const y = horizonY(cam);
+  const { w, h } = cam;
+  if (y >= h) {
+    const sky = ctx.createLinearGradient(0, 0, 0, h);
+    sky.addColorStop(0, "#0b1016");
+    sky.addColorStop(1, "#1a2633");
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, w, h);
+    return;
+  }
+  if (y <= 0) {
+    ctx.fillStyle = "#121920";
+    ctx.fillRect(0, 0, w, h);
+    return;
+  }
+  const sky = ctx.createLinearGradient(0, 0, 0, y);
+  sky.addColorStop(0, "#0b1016");
+  sky.addColorStop(1, "#1a2633");
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, w, y);
+  ctx.fillStyle = "#121920";
+  ctx.fillRect(0, y, w, h - y);
+}
+
 /** Look-at with world up. Dragging orbits the camera; the machine stays planted. */
 function viewBasis(eye, target, h) {
   const zaxis = norm(sub(eye, target));
@@ -445,13 +488,6 @@ export function draw(canvas, st) {
     canvas.height = Math.floor(h * dpr);
   }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const sky = ctx.createLinearGradient(0, 0, 0, h);
-  sky.addColorStop(0, "#161d28");
-  sky.addColorStop(0.45, "#0d1219");
-  sky.addColorStop(1, "#070a0e");
-  ctx.fillStyle = sky;
-  ctx.fillRect(0, 0, w, h);
-
   const s = st.specs;
   followX = st.x;
 
@@ -493,6 +529,7 @@ export function draw(canvas, st) {
     w,
     h,
   };
+  paintWorld(ctx, cam);
 
   const polys = [];
   function depthOf(p) {
