@@ -224,6 +224,7 @@ header h1 {
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-size: 0.72rem;
   color: var(--text);
+  text-align: right;
 }
 
 .watts, .net {
@@ -232,7 +233,7 @@ header h1 {
   font-weight: 600;
 }
 
-.watts { font-size: 1.05rem; min-width: 5.4rem; text-align: right; }
+.watts { font-size: 1.05rem; text-align: left; }
 .net { font-size: 0.78rem; color: var(--text); }
 .substat { font-size: 0.68rem; color: var(--muted); }
 

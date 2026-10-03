@@ -8,8 +8,8 @@ import {
   sampleCycle,
   solvePlan,
   step,
-} from "./sim.js?v=128";
-import { draw, bindCam } from "./view.js?v=128";
+} from "./sim.js?v=129";
+import { draw, bindCam } from "./view.js?v=129";
 
 // v3: the reference sail is 2.5×4 m on a 10 m track with a 0.5 s turn.
 // Saved v2 specs would put the old 5×2 m machine back on screen.
@@ -178,12 +178,16 @@ function paint() {
   const pctAlong = Math.max(0, Math.min(100, frac * 100));
   $("map-dot").style.left = pctAlong + "%";
   $("track-map").setAttribute("aria-valuenow", Math.round(pctAlong));
-  paintGauge(frac);
+  paintGauge();
   draw($("view"), state);
 }
 
-/** One settled cycle. Green is power made, amber is power spent. The line is now. */
-function paintGauge(frac) {
+/**
+ * Two dials. Straight up is zero. Right is downwind power and downwind
+ * speed, left is the cost of the return. Full scale is the hard part of
+ * one settled cycle, so a normal stroke uses the face of the dial.
+ */
+function paintGauge() {
   const canvas = $("gauge");
   if (!canvas) return;
   const dpr = Math.max(2, Math.min(3, window.devicePixelRatio || 1));
@@ -199,43 +203,50 @@ function paintGauge(frac) {
   const ctx = canvas.getContext("2d");
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
-  const mid = h / 2;
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.28)";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(0, mid);
-  ctx.lineTo(w, mid);
-  ctx.stroke();
 
   const frames = cycle && cycle.frames;
+  let powerScale = 1500;
+  let speedScale = Math.max(1, Math.abs(state.specs.wind), Math.abs(state.specs.vReturn || 0));
   if (frames && frames.length > 1) {
-    const scale = Math.max(1, (cycle.span || 0) - 1000);
-    const yOf = (inst) => mid - Math.max(-1, Math.min(1, inst / scale)) * (mid - 1);
-    const area = (above) => {
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(0, above ? 0 : mid, w, mid);
-      ctx.clip();
-      ctx.beginPath();
-      ctx.moveTo(0, mid);
-      for (let i = 0; i < frames.length; i++) {
-        ctx.lineTo((i / (frames.length - 1)) * w, yOf(frames[i].inst));
-      }
-      ctx.lineTo(w, mid);
-      ctx.closePath();
-      ctx.fillStyle = above ? "rgba(52, 211, 153, 0.9)" : "rgba(251, 191, 36, 0.92)";
-      ctx.fill();
-      ctx.restore();
-    };
-    area(true);
-    area(false);
-    const x = Math.max(0, Math.min(1, frac)) * w;
-    ctx.strokeStyle = "rgba(232, 237, 244, 0.95)";
-    ctx.beginPath();
-    ctx.moveTo(x, 1);
-    ctx.lineTo(x, h - 1);
-    ctx.stroke();
+    powerScale = Math.max(1, (cycle.span || 0) - 1000);
+    for (const f of frames) speedScale = Math.max(speedScale, Math.abs(f.vx));
   }
+  const gap = 18;
+  const slot = (w - gap) / 2;
+  const r = Math.max(8, Math.min(h - 10, slot / 2 - 6));
+  drawDial(ctx, slot / 2, h - 2, r, state.inst / powerScale, "W");
+  drawDial(ctx, slot + gap + slot / 2, h - 2, r, state.vx / speedScale, "m/s");
+}
+
+function drawDial(ctx, cx, cy, r, t, label) {
+  const v = Math.max(-1, Math.min(1, t));
+  const ang = Math.PI + ((v + 1) / 2) * Math.PI;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, Math.PI, 2 * Math.PI);
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.16)";
+  ctx.lineWidth = 4;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 1.5 * Math.PI, ang, v < 0);
+  ctx.strokeStyle = v >= 0 ? "#34d399" : "#fbbf24";
+  ctx.lineWidth = 4;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.lineTo(cx + Math.cos(ang) * (r - 7), cy + Math.sin(ang) * (r - 7));
+  ctx.strokeStyle = "#e8edf4";
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(cx, cy, 2.4, 0, Math.PI * 2);
+  ctx.fillStyle = "#e8edf4";
+  ctx.fill();
+  ctx.fillStyle = "rgba(125, 143, 163, 0.95)";
+  ctx.font = "600 11px IBM Plex Mono, ui-monospace, monospace";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(label, cx, cy - r * 0.42);
 }
 
 function frame(t) {
