@@ -1,6 +1,6 @@
 /** Side view of the machine. Face-on sail is the thin plate. Edge-on sail faces the camera. */
 
-import { stroke } from "./sim.js?v=123";
+import { stroke } from "./sim.js?v=126";
 
 function sub(a, b) {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -947,9 +947,20 @@ export function draw(canvas, st) {
   for (const dot of windDraw) {
     if (dot.z > sailDepth - 0.05) continue;
     const p = dot.p;
+    const dx = p.x - bx;
+    // Only the grains in the plate itself are dropped. Edge-on, the face
+    // fills the view, and testing the outline alone hid the stream running
+    // along that side.
+    const lx = dx * wc + p.z * ws;
     const ly = p.y - midY;
-    const lz = -(p.x - bx) * ws + p.z * wc;
-    if (Math.abs(ly) < s.plateH / 2 && Math.abs(lz) < s.plateW / 2) continue;
+    const lz = -dx * ws + p.z * wc;
+    if (
+      Math.abs(lx) < 0.08 &&
+      Math.abs(ly) < s.plateH / 2 &&
+      Math.abs(lz) < s.plateW / 2
+    ) {
+      continue;
+    }
     paintGrain(ctx, dot, dpr);
   }
   ctx.restore();
