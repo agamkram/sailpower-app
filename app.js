@@ -8,8 +8,8 @@ import {
   sampleCycle,
   solvePlan,
   step,
-} from "./sim.js?v=136";
-import { draw, bindCam } from "./view.js?v=136";
+} from "./sim.js?v=137";
+import { draw, bindCam } from "./view.js?v=137";
 
 // v3: the reference sail is 2.5×4 m on a 10 m track with a 0.5 s turn.
 // Saved v2 specs would put the old 5×2 m machine back on screen.
@@ -212,9 +212,10 @@ function paint() {
 }
 
 /**
- * One round dial, as tall as its box. Power uses the top half, speed the
- * bottom. Straight up and straight down are zero. Right is downwind, left
- * is the return. Full scale is the hard part of one settled cycle.
+ * One round dial, as tall as its box. The top half is power: green is watts
+ * being made, yellow is watts being used. The bottom half is speed. Straight
+ * up and straight down are zero. Right is downwind, left is the return.
+ * Full scale is the hard part of one settled cycle.
  */
 function paintGauge() {
   const canvas = $("gauge");
@@ -259,17 +260,28 @@ function speedAngle(t) {
 function drawRoundDial(ctx, cx, cy, r, power, speed) {
   const p = Math.max(-1, Math.min(1, power));
   const s = Math.max(-1, Math.min(1, speed));
+  const gen = Math.max(0, p);
+  const use = Math.max(0, -p);
   ctx.lineCap = "round";
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
   ctx.strokeStyle = "rgba(255, 255, 255, 0.16)";
   ctx.lineWidth = 4;
   ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(cx, cy, r, 1.5 * Math.PI, powerAngle(p), p < 0);
-  ctx.strokeStyle = p >= 0 ? "#34d399" : "#fbbf24";
-  ctx.lineWidth = 4;
-  ctx.stroke();
+  if (gen > 0.004) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 1.5 * Math.PI, powerAngle(gen), false);
+    ctx.strokeStyle = "#34d399";
+    ctx.lineWidth = 4;
+    ctx.stroke();
+  }
+  if (use > 0.004) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 1.5 * Math.PI, powerAngle(-use), true);
+    ctx.strokeStyle = "#ffe14a";
+    ctx.lineWidth = 4;
+    ctx.stroke();
+  }
   ctx.beginPath();
   ctx.arc(cx, cy, r, Math.PI / 2, speedAngle(s), s > 0);
   ctx.strokeStyle = "#3d9cf5";
@@ -285,7 +297,8 @@ function drawRoundDial(ctx, cx, cy, r, power, speed) {
     ctx.stroke();
   };
   hand(speedAngle(s), r - 7, "#3d9cf5", 2);
-  hand(powerAngle(p), r - 7, p >= 0 ? "#34d399" : "#fbbf24", 1.75);
+  hand(powerAngle(-use), r - 7, "#ffe14a", 1.75);
+  hand(powerAngle(gen), r - 7, "#34d399", 1.75);
   ctx.beginPath();
   ctx.arc(cx, cy, 2.6, 0, Math.PI * 2);
   ctx.fillStyle = "#e8edf4";
@@ -294,7 +307,7 @@ function drawRoundDial(ctx, cx, cy, r, power, speed) {
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.font = "600 10px IBM Plex Mono, ui-monospace, monospace";
-  ctx.fillStyle = p >= 0 ? "#34d399" : "#fbbf24";
+  ctx.fillStyle = "#34d399";
   ctx.fillText("W", cx - r * 0.34, cy - r * 0.28);
   ctx.fillStyle = "#3d9cf5";
   ctx.font = "600 9px IBM Plex Mono, ui-monospace, monospace";
