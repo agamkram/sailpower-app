@@ -7,8 +7,8 @@ import {
   sampleCycle,
   solvePlan,
   step,
-} from "./sim.js?v=144";
-import { draw, bindCam } from "./view.js?v=144";
+} from "./sim.js?v=145";
+import { draw, bindCam } from "./view.js?v=145";
 
 // v3: the reference sail is 2.5×4 m on a 10 m track with a 0.5 s turn.
 // Saved v2 specs would put the old 5×2 m machine back on screen.
@@ -331,7 +331,6 @@ function frame(t) {
 function startLoop() {
   if (raf || document.hidden) return;
   last = 0;
-  shownAt = 0;
   raf = requestAnimationFrame(frame);
 }
 
