@@ -7,8 +7,8 @@ import {
   sampleCycle,
   solvePlan,
   step,
-} from "./sim.js?v=143";
-import { draw, bindCam } from "./view.js?v=143";
+} from "./sim.js?v=144";
+import { draw, bindCam } from "./view.js?v=144";
 
 // v3: the reference sail is 2.5×4 m on a 10 m track with a 0.5 s turn.
 // Saved v2 specs would put the old 5×2 m machine back on screen.
@@ -24,14 +24,11 @@ let spanTimer = 0;
 let cycle = null;
 let cycleKey = "";
 let scrub = null;
-// Shown numbers ease, then hold. A ramp would still march the digits if they
-// only lagged. The needle stays live.
-let shownW = 0;
-let shownV = 0;
-let shownAt = 0;
-let postedW = 0;
-let postedV = 0;
-let postedAt = 0;
+// Last number written. It stays until the sim has moved past it, so chatter
+// does not change the digits and a real change shows up immediately.
+let postedW = null;
+let postedV = null;
+let postedAvg = null;
 
 const $ = (id) => document.getElementById(id);
 
@@ -159,34 +156,32 @@ function fmtW(w) {
   return sign + n.toLocaleString("en-US") + " W";
 }
 
-function ease(cur, target, dt, tau) {
-  if (!(dt > 0)) return target;
-  const a = 1 - Math.exp(-dt / tau);
-  return cur + (target - cur) * a;
-}
-
 function paint() {
-  const now = performance.now() / 1000;
-  const dt = shownAt ? Math.min(0.1, now - shownAt) : 0.016;
-  shownAt = now;
-  shownW = ease(shownW, state.inst, dt, 0.3);
-  shownV = ease(shownV, state.vx, dt, 0.3);
   const dur = cycle ? cycle.seconds : state.lastCycleS;
-  const post = scrub != null || now - postedAt >= 0.35;
-  if (post) {
-    postedAt = now;
-    postedW = shownW;
-    postedV = shownV;
+  if (scrub != null) {
+    postedW = state.inst;
+    postedV = state.vx;
     $("speed").textContent = postedV.toFixed(1) + " m/s";
     $("watts").textContent = fmtW(postedW);
     $("watts").style.color = postedW >= 0 ? "var(--green)" : "var(--amber)";
-    if (scrub != null) {
-      $("net").textContent = (scrub * dur).toFixed(2) + " s";
-    } else {
-      const avg = avgWatts(state);
-      $("net").textContent = avg == null ? "net —" : "net " + Math.round(avg) + " W";
-    }
+    $("net").textContent = (scrub * dur).toFixed(2) + " s";
     $("substat").textContent = "";
+  } else {
+    if (postedW == null || Math.abs(state.inst - postedW) >= 40) {
+      postedW = state.inst;
+      $("watts").textContent = fmtW(postedW);
+      $("watts").style.color = postedW >= 0 ? "var(--green)" : "var(--amber)";
+    }
+    if (postedV == null || Math.abs(state.vx - postedV) >= 0.2) {
+      postedV = state.vx;
+      $("speed").textContent = postedV.toFixed(1) + " m/s";
+    }
+    const avg = avgWatts(state);
+    const avgN = avg == null ? null : Math.round(avg);
+    if (avgN !== postedAvg) {
+      postedAvg = avgN;
+      $("net").textContent = avgN == null ? "net —" : "net " + avgN + " W";
+    }
   }
   let frac;
   if (scrub != null) frac = scrub;
