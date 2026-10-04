@@ -7,8 +7,8 @@ import {
   sampleCycle,
   solvePlan,
   step,
-} from "./sim.js?v=150";
-import { draw, bindCam } from "./view.js?v=150";
+} from "./sim.js?v=156";
+import { draw, bindCam } from "./view.js?v=156";
 
 // v3: the reference sail is 2.5×4 m on a 10 m track with a 0.5 s turn.
 // Saved v2 specs would put the old 5×2 m machine back on screen.
@@ -501,6 +501,14 @@ for (const id of FIELDS) {
 fillForm();
 refreshSpan();
 pin();
+{
+  const tag = $("build-tag");
+  if (tag) {
+    const src = document.querySelector('script[type="module"][src*="app.js"]')?.getAttribute("src") || "";
+    const m = src.match(/\?v=(\d+)/);
+    tag.textContent = m ? "v" + m[1] : "";
+  }
+}
 bindCam($("view"), () => {
   $("cam-hint")?.classList.add("is-gone");
   if (!running) paint();

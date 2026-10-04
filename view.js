@@ -1,6 +1,6 @@
 /** Side view of the machine. Face-on sail is the thin plate. Edge-on sail faces the camera. */
 
-import { stroke } from "./sim.js?v=150";
+import { stroke } from "./sim.js?v=156";
 
 function sub(a, b) {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -55,6 +55,7 @@ let followX = null;
 // share its clock, including the rate button. While it is paused they keep
 // drifting on the wall clock so the slider still shows.
 const windParts = [];
+const windFill = [];
 const windSmoke = [];
 const windDraw = [];
 let windWall = 0;
@@ -111,6 +112,50 @@ function outsideAir(p, band, xLo, xHi) {
     Math.abs(p.z) > box.zHalf + 0.7 ||
     p.y > box.y1 + 0.45 ||
     p.y < box.y0 - 0.35
+  );
+}
+
+/**
+ * The rest of the air, out where the plate changes nothing. Centred on the
+ * machine rather than on the screen, so orbiting cannot move it: tying the
+ * volume to the camera teleports every grain on each drag, and the wind
+ * stops until the drag ends.
+ */
+function fillSection(dist, followX) {
+  const r = Math.min(40, Math.max(18, dist * 2.5));
+  return {
+    x0: followX - r,
+    x1: followX + r,
+    zHalf: r,
+    y0: 0.05,
+    y1: Math.min(26, Math.max(10, dist * 1.6)),
+  };
+}
+
+function reseedFill(p, box, core, inlet) {
+  p.a = 0.35 + Math.random() * 0.4;
+  // Weighted low. Half the frame is ground, and that half is near the camera,
+  // so a flat spread through a box this tall leaves it empty.
+  const u = Math.random();
+  p.y = box.y0 + (box.y1 - box.y0) * u * u * Math.sqrt(u);
+  if (p.y > core.y0 && p.y < core.y1) {
+    // Clear of the sail's own cross-section, so a fill grain never has to be
+    // held off the plate and can run on the free stream alone.
+    const t = core.zHalf + Math.random() * Math.max(0.5, box.zHalf - core.zHalf);
+    p.z = Math.random() < 0.5 ? -t : t;
+  } else {
+    p.z = (Math.random() - 0.5) * 2 * box.zHalf;
+  }
+  p.x = inlet ? box.x0 : box.x0 + Math.random() * (box.x1 - box.x0);
+}
+
+function outsideFill(p, box) {
+  return (
+    p.x > box.x1 ||
+    p.x < box.x0 - 0.5 ||
+    Math.abs(p.z) > box.zHalf + 1 ||
+    p.y > box.y1 + 1 ||
+    p.y < box.y0 - 0.5
   );
 }
 
@@ -1060,6 +1105,31 @@ export function draw(canvas, st) {
       if (!q || q.z < 0.4) continue;
       windDraw.push({ p, q, z: q.z });
     }
+
+    // The rest of the sky and field. Out here the plate changes nothing, so
+    // these only run downwind, and distance alone thins them: the same
+    // 14 m falloff the near grains use leaves these at about a fifth of the
+    // weight of the ones around the sail.
+    const fillBox = fillSection(camCtl.dist, followX);
+    const core = airSection(band);
+    const fillCount = 2000;
+    while (windFill.length < fillCount) {
+      const p = { x: 0, y: 0, z: 0, a: 0.5 };
+      reseedFill(p, fillBox, core, false);
+      windFill.push(p);
+    }
+    if (windFill.length > fillCount) windFill.length = fillCount;
+    for (let i = 0; i < fillCount; i++) {
+      const p = windFill[i];
+      p.x += speed * dt;
+      if (outsideFill(p, fillBox)) reseedFill(p, fillBox, core, true);
+      const q = project([p.x, p.y, p.z]);
+      // Anything inside a couple of metres whips across the frame and reads
+      // as a smear on the lens rather than as air.
+      if (!q || q.z < 2.5) continue;
+      windDraw.push({ p, q, z: q.z });
+    }
+
     // Separated-region grains. Same field as the free stream.
     if (Math.abs(Math.cos(yaw)) > 0.2 && Math.abs(sail.U) > 0.15) {
       while (windSmoke.length < 48) windSmoke.push({ x: 0, y: -10, z: 0, a: 0.5, live: false });
