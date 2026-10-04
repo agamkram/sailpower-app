@@ -1,6 +1,6 @@
 /** Side view of the machine. Face-on sail is the thin plate. Edge-on sail faces the camera. */
 
-import { stroke } from "./sim.js?v=156";
+import { stroke } from "./sim.js?v=157";
 
 function sub(a, b) {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -55,6 +55,7 @@ let followX = null;
 // share its clock, including the rate button. While it is paused they keep
 // drifting on the wall clock so the slider still shows.
 const windParts = [];
+const windHalo = [];
 const windFill = [];
 const windSmoke = [];
 const windDraw = [];
@@ -113,6 +114,69 @@ function outsideAir(p, band, xLo, xHi) {
     p.y > box.y1 + 0.45 ||
     p.y < box.y0 - 0.35
   );
+}
+
+/**
+ * Shells around the sail's own cross-section, measured in units of it, so a
+ * shell at r = 1 sits exactly on its edge. Rectangular rather than round
+ * because it has to meet a rectangular cross-section without a seam.
+ */
+function haloSection(band) {
+  const core = airSection(band);
+  return {
+    cy: (core.y0 + core.y1) / 2,
+    zc: core.zHalf,
+    yc: (core.y1 - core.y0) / 2,
+    rMax: 2.5,
+  };
+}
+
+/** Where a grain sits in those shells. 1 is the edge of the sail's stream. */
+function haloRadius(p, h) {
+  return Math.max(Math.abs(p.z) / h.zc, Math.abs(p.y - h.cy) / h.yc);
+}
+
+/**
+ * Grains that bridge the stream to the free air. Density falls as r^-3 from
+ * the stream's own value down to nothing at rMax, so there is no step at
+ * either end: without this the stream ends on a hard rectangle and reads as
+ * a second, separate wind.
+ */
+function reseedHalo(p, h, xLo, xHi, inlet) {
+  p.a = 0.35 + Math.random() * 0.4;
+  p.ox = 0;
+  p.oy = 0;
+  p.oz = 0;
+  const rMax = h.rMax;
+  const tail = 1 / (rMax * rMax * rMax);
+  const gMax = 1 - tail;
+  for (let attempt = 0; attempt < 12; attempt++) {
+    // Rejection draw on r^-3 weighted by the shell's own perimeter.
+    let r = 1;
+    for (let i = 0; i < 16; i++) {
+      r = 1 + Math.random() * (rMax - 1);
+      if (Math.random() * gMax <= 1 / (r * r) - tail * r) break;
+    }
+    // Uniform along the shell: the long faces get proportionally more.
+    if (Math.random() < h.yc / (h.zc + h.yc)) {
+      p.z = (Math.random() < 0.5 ? -1 : 1) * h.zc * r;
+      p.y = h.cy + (Math.random() * 2 - 1) * h.yc * r;
+    } else {
+      p.y = h.cy + (Math.random() < 0.5 ? -1 : 1) * h.yc * r;
+      p.z = (Math.random() * 2 - 1) * h.zc * r;
+    }
+    // Below the grass there is no air. Draw again rather than fold it up,
+    // which would pile grains along the ground line.
+    if (p.y > 0.06) break;
+  }
+  if (p.y <= 0.06) p.y = 0.06 + Math.random() * 0.3;
+  p.x = inlet ? xLo : xLo + Math.random() * Math.max(0.4, xHi - xLo);
+}
+
+function outsideHalo(p, h, xLo, xHi) {
+  if (p.x < xLo || p.x > xHi || p.y < 0.04) return true;
+  const r = haloRadius(p, h);
+  return r > h.rMax + 0.25 || r < 0.92;
 }
 
 /**
@@ -1101,6 +1165,36 @@ export function draw(canvas, st) {
       p.z += p.oz * dt;
       holdOffPlate(p, sail);
       if (outsideAir(p, band, stream0, stream1)) reseedWind(p, band, stream0, stream1, true);
+      const q = project([p.x, p.y, p.z]);
+      if (!q || q.z < 0.4) continue;
+      windDraw.push({ p, q, z: q.z });
+    }
+
+    // Shoulder between the stream and the free air. These see the same wash
+    // as the grains inside, so the bending does not stop at a line either.
+    const halo = haloSection(band);
+    const rM = halo.rMax;
+    const tail = 1 / (rM * rM * rM);
+    // Grains needed to hold r^-3 out to rMax starting from the stream's own
+    // density, so neither edge of the shoulder is a step.
+    const shellInt = 1 - 1 / rM - ((rM * rM - 1) * tail) / 2;
+    const haloCount = Math.min(1900, Math.round((2 * count * shellInt) / (1 - tail)));
+    while (windHalo.length < haloCount) {
+      const p = { x: 0, y: 0, z: 0, ox: 0, oy: 0, oz: 0, a: 0.5 };
+      reseedHalo(p, halo, stream0, stream1);
+      windHalo.push(p);
+    }
+    if (windHalo.length > haloCount) windHalo.length = haloCount;
+    for (let i = 0; i < haloCount; i++) {
+      const p = windHalo[i];
+      sailFlow(p, field, wash);
+      p.ox = wash[0];
+      p.oy = wash[1];
+      p.oz = wash[2];
+      p.x += (speed + p.ox) * dt;
+      p.y += p.oy * dt;
+      p.z += p.oz * dt;
+      if (outsideHalo(p, halo, stream0, stream1)) reseedHalo(p, halo, stream0, stream1, true);
       const q = project([p.x, p.y, p.z]);
       if (!q || q.z < 0.4) continue;
       windDraw.push({ p, q, z: q.z });
