@@ -3,13 +3,12 @@ import {
   createState,
   defaultSpecs,
   fitError,
-  netOf,
   rig,
   sampleCycle,
   solvePlan,
   step,
-} from "./sim.js?v=142";
-import { draw, bindCam } from "./view.js?v=142";
+} from "./sim.js?v=143";
+import { draw, bindCam } from "./view.js?v=143";
 
 // v3: the reference sail is 2.5×4 m on a 10 m track with a 0.5 s turn.
 // Saved v2 specs would put the old 5×2 m machine back on screen.
@@ -29,11 +28,9 @@ let scrub = null;
 // only lagged. The needle stays live.
 let shownW = 0;
 let shownV = 0;
-let shownJ = 0;
 let shownAt = 0;
 let postedW = 0;
 let postedV = 0;
-let postedJ = 0;
 let postedAt = 0;
 
 const $ = (id) => document.getElementById(id);
@@ -162,11 +159,6 @@ function fmtW(w) {
   return sign + n.toLocaleString("en-US") + " W";
 }
 
-function fmtKJ(j) {
-  const sign = j > 0 ? "+" : "";
-  return sign + (j / 1000).toFixed(2) + " kJ";
-}
-
 function ease(cur, target, dt, tau) {
   if (!(dt > 0)) return target;
   const a = 1 - Math.exp(-dt / tau);
@@ -179,26 +171,22 @@ function paint() {
   shownAt = now;
   shownW = ease(shownW, state.inst, dt, 0.3);
   shownV = ease(shownV, state.vx, dt, 0.3);
-  const net = netOf(state);
-  if (scrub == null) shownJ = ease(shownJ, net, dt, 0.3);
   const dur = cycle ? cycle.seconds : state.lastCycleS;
   const post = scrub != null || now - postedAt >= 0.35;
   if (post) {
     postedAt = now;
     postedW = shownW;
     postedV = shownV;
-    postedJ = shownJ;
     $("speed").textContent = postedV.toFixed(1) + " m/s";
     $("watts").textContent = fmtW(postedW);
     $("watts").style.color = postedW >= 0 ? "var(--green)" : "var(--amber)";
     if (scrub != null) {
       $("net").textContent = (scrub * dur).toFixed(2) + " s";
-      $("substat").textContent = "";
     } else {
-      $("net").textContent = "net " + fmtKJ(postedJ);
       const avg = avgWatts(state);
-      $("substat").textContent = avg == null ? "" : Math.round(avg) + " W avg";
+      $("net").textContent = avg == null ? "net —" : "net " + Math.round(avg) + " W";
     }
+    $("substat").textContent = "";
   }
   let frac;
   if (scrub != null) frac = scrub;
