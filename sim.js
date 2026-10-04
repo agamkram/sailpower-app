@@ -12,12 +12,11 @@ export function defaultSpecs() {
     thickness: 0.006,
     turn: 0.3,
     turnLead: 0.45,
-    coilMode: "limited",
     vNoLoad: 22,
     ironRef: 35,
     slewRegen: 0,
-    vReturn: 8,
-    outFrac: 0.2,
+    vReturn: 10,
+    outFrac: 0.24,
     harvest: 18,
     cuMax: 120,
   });
@@ -91,21 +90,6 @@ export function forceLimit(s, vx, motoring) {
   if (!motoring) return s.fMax;
   const vnl = Math.max(1, s.vNoLoad ?? 22);
   return s.fMax * Math.max(0, 1 - Math.abs(vx) / vnl);
-}
-
-/**
- * Smallest yaw that keeps the sail's push inside the coils' authority. Above
- * roughly 12 m/s of wind a 10 m2 sail out-pushes the rail, and a real machine
- * sheds the excess by turning away from the wind rather than stalling.
- */
-export function featherFloor(s, vx) {
-  const vRel = vx - s.wind;
-  const q = 0.5 * s.rho * vRel * vRel;
-  const r = rig(s);
-  const full = q * r.cd * r.area;
-  const cap = forceLimit(s, vx, false) * 0.9;
-  if (full <= cap || full <= 0) return 0;
-  return Math.acos(Math.sqrt(clamp(cap / full, 0, 1)));
 }
 
 /**
@@ -247,10 +231,6 @@ export function stroke(s) {
   };
 }
 
-export function endPad(s) {
-  return stroke(s).lo;
-}
-
 export function fitError(s) {
   const { lo, hi } = stroke(s);
   if (hi - lo < 2) return "Track is too short.";
@@ -284,7 +264,6 @@ export function createState(specs) {
     force: 0,
     faero: 0,
     slip: false,
-    feather: 0,
     saturated: false,
     satTime: 0,
     cycleT: 0,
@@ -307,20 +286,6 @@ export function createState(specs) {
 
 export function netOf(st) {
   return st.gen - st.mot - st.slew - st.loss - st.stop;
-}
-
-/**
- * Average net power over whole cycles, or null before the first one closes.
- *
- * The cart starts at the home cap face-on, which is where a cycle begins, so
- * there is no settling transient to discard: cycle one already runs at the
- * steady figure. What does mislead is the cycle in progress. Dividing the
- * running total by the running clock counts a part-finished cycle that has
- * taken the power stroke and not yet paid for the trip home, and on a machine
- * with a long cycle that reads tens of percent high.
- */
-export function avgWatts(st) {
-  return st.avgT > 0 ? st.avgNet / st.avgT : null;
 }
 
 /**
@@ -407,22 +372,15 @@ function rollForce(s, vx, fa) {
 
 function brakeDist(s, speed, fa, mEff) {
   const cap = forceLimit(s, speed, false);
-  // The sail turns away while braking, so never assume it keeps pushing at
-  // full face-on load. Without this the stopping distance blows up and the
-  // cart enters the brake at the top of the stroke.
-  const push = Math.min(speed >= 0 ? Math.max(0, fa) : Math.max(0, -fa), cap * 0.9);
+  const push = speed >= 0 ? Math.max(0, fa) : Math.max(0, -fa);
   const net = cap - push;
   // No spare brake at all means there is nothing to stop with. A few tens of
-  // newtons is still a stop: a 300 N rail held to 90% has 30 N left, and that
-  // halts a light cart in a few metres. Treating that as impossible made the
-  // cart creep a whole long track and never be counted as a cycle.
+  // newtons is still a stop: a light cart on a 300 N rail with 30 N left
+  // halts in a few metres. Treating that as impossible made the cart creep
+  // a whole long track and never be counted as a cycle.
   if (net <= 1) return Math.abs(speed) > 0.4 ? 1e6 : 0.15;
   const a = (net / Math.max(5, mEff)) * 0.85;
   return (speed * speed) / (2 * a) + 0.3;
-}
-
-function canHold(s, fa, fr) {
-  return Math.abs(fa + fr) <= s.fMax;
 }
 
 /**
@@ -482,7 +440,6 @@ function sub(st, dt) {
   const lead = clamp(s.turnLead ?? 0, 0, 1) * turnSec;
   const vOut = s.wind * s.outFrac;
   const turnRate = (Math.PI / 2) / turnSec;
-  const stiff = s.coilMode === "stiff";
   const rg = rig(s);
   const mEff = movingMass(s, st.alpha);
   const brake = brakeDist(s, st.vx, fa, mEff);
@@ -512,13 +469,6 @@ function sub(st, dt) {
     st.alpha = Math.max(0, st.alpha - turnRate * dt);
   }
 
-  // The rail can still be overpowered. Record it, but do not turn the sail
-  // to shed it. Doing that made width start a second rotation: a wide plate
-  // flipped to edge on the way out, then flipped back to face at home.
-  // The Turn slider is the only thing that turns the sail.
-  const shedding = phase === "brakeOut" || phase === "turnEdge";
-  st.feather = shedding ? featherFloor(s, st.vx) : 0;
-
   // Work the slew drive does. A real slew accelerates through the first
   // half of the 90° and brakes through the second. The spin energy is
   // spent across that first half, not dumped into one step; spin-down
@@ -545,45 +495,37 @@ function sub(st, dt) {
   st.cycleSlew += slewE;
 
   const faNow = aeroForce(s, st.vx, st.alpha);
-  let fCmd;
-  let coilLimited = false;
-  if (stiff) {
-    let raw;
-    if (phase === "out") raw = mEff * 4 * (vOut - st.vx) - faNow - fr;
-    else if (phase === "back") raw = mEff * 4 * (-Math.abs(s.vReturn) - st.vx) - faNow - fr;
-    else if (phase === "brakeOut" || phase === "turnEdge") {
-      raw = mEff * (22 * (hi - st.x) + 9 * (0 - st.vx)) - faNow - fr;
-    } else {
-      raw = mEff * (22 * (lo - st.x) + 9 * (0 - st.vx)) - faNow - fr;
-    }
-    const up = st.vx >= 0 ? forceLimit(s, st.vx, true) : forceLimit(s, st.vx, false);
-    const dn = st.vx >= 0 ? forceLimit(s, st.vx, false) : forceLimit(s, st.vx, true);
-    coilLimited = raw > up + 5 || raw < -dn - 5;
-    fCmd = clamp(raw, -dn, up);
+  let aDes = 0;
+  if (phase === "out") aDes = 4 * (vOut - st.vx);
+  else if (phase === "back") aDes = 4 * (-Math.abs(s.vReturn) - st.vx);
+  else if (phase === "brakeOut" || phase === "turnEdge") {
+    const gapRaw = hi - st.x;
+    const gap = Math.max(0.02, gapRaw);
+    const vClose = creep(gapRaw);
+    // Stay on the stop-at-the-cap curve until the cart is in the last
+    // stretch or already slower than the creep. Switching at 0.5 m/s a
+    // metre out left it cruising into the bumper; flooring the gap at
+    // 0.12 m then asked for a gentle last decimetre and charged a hit.
+    const closing = gapRaw > 0.2 && st.vx > 0.05;
+    aDes = closing || st.vx > vClose
+      ? -(st.vx * st.vx) / (2 * gap)
+      : 4 * (vClose - st.vx);
   } else {
-    let aDes = 0;
-    if (phase === "out") aDes = 4 * (vOut - st.vx);
-    else if (phase === "back") aDes = 4 * (-Math.abs(s.vReturn) - st.vx);
-    else if (phase === "brakeOut" || phase === "turnEdge") {
-      const gap = hi - st.x;
-      const vClose = creep(gap);
-      // The stop-at-the-cap profile and the creep used to switch at 0.05 m/s,
-      // below the creep itself, so each undid the other and the last fraction
-      // of a metre took several seconds.
-      aDes = st.vx > vClose ? -(st.vx * st.vx) / (2 * Math.max(0.12, gap)) : 4 * (vClose - st.vx);
-    } else {
-      const gap = st.x - lo;
-      const vClose = creep(gap);
-      aDes = st.vx < -vClose ? (st.vx * st.vx) / (2 * Math.max(0.12, gap)) : 4 * (-vClose - st.vx);
-    }
-    const up = st.vx >= 0 ? forceLimit(s, st.vx, true) : forceLimit(s, st.vx, false);
-    const dn = st.vx >= 0 ? forceLimit(s, st.vx, false) : forceLimit(s, st.vx, true);
-    const aMin = (faNow + fr - dn) / mEff;
-    const aMax = (faNow + fr + up) / mEff;
-    const aUse = clamp(aDes, aMin, aMax);
-    coilLimited = Math.abs(aUse - aDes) > 0.2;
-    fCmd = mEff * aUse - faNow - fr;
+    const gapRaw = st.x - lo;
+    const gap = Math.max(0.02, gapRaw);
+    const vClose = creep(gapRaw);
+    const closing = gapRaw > 0.2 && st.vx < -0.05;
+    aDes = closing || st.vx < -vClose
+      ? (st.vx * st.vx) / (2 * gap)
+      : 4 * (-vClose - st.vx);
   }
+  const up = st.vx >= 0 ? forceLimit(s, st.vx, true) : forceLimit(s, st.vx, false);
+  const dn = st.vx >= 0 ? forceLimit(s, st.vx, false) : forceLimit(s, st.vx, true);
+  const aMin = (faNow + fr - dn) / mEff;
+  const aMax = (faNow + fr + up) / mEff;
+  const aUse = clamp(aDes, aMin, aMax);
+  const coilLimited = Math.abs(aUse - aDes) > 0.2;
+  const fCmd = mEff * aUse - faNow - fr;
   st.saturated = coilLimited;
   if (coilLimited) st.satTime += dt;
 
@@ -621,17 +563,15 @@ function sub(st, dt) {
 
   // Bank this step before the cycle is allowed to close, so the closing step
   // belongs to the cycle it finished and the next one starts from zero.
-  // Harvest is the share of the wind through the sail. The inverter keeps
-  // 98% of it on the power stroke. The push is that same share, not a
-  // second drag setting. The return adds none.
+  // Generation is the mechanical power through the coils, after the inverter.
+  // A flat share of the wind paid that rate while the cart sat still and
+  // while the sail was edge-on, so a slower return looked like more watts.
   const mech = -fCmd * st.vx;
-  const harvesting = phase === "out" || phase === "brakeOut";
-  if (harvesting) {
-    const e = harvestWatts(s) * (s.eta ?? DRIVE) * dt;
+  if (mech >= 0) {
+    const e = mech * s.etaG * dt;
     st.gen += e;
     st.cycleGen += e;
-  }
-  if (mech < 0) {
+  } else {
     const e = (-mech / s.etaM) * dt;
     st.mot += e;
     st.cycleMot += e;
@@ -690,19 +630,6 @@ export function step(st, dt) {
   if (span > 0) st.inst = (netOf(st) - net0) / span;
 }
 
-/** What the chosen plan actually does, for display next to the selector. */
-export function planInfo(s) {
-  const vOut = s.wind * s.outFrac;
-  const fa = aeroForce(s, vOut, 0);
-  return {
-    vOut,
-    turn: Math.max(0.15, s.turn),
-    lead: clamp(s.turnLead ?? 0, 0, 1) * Math.max(0.15, s.turn),
-    brakeM: brakeDist(s, vOut, fa, movingMass(s, 0)),
-    torqueNm: slewTorque(s),
-  };
-}
-
 /**
  * Largest |watts| that lasts more than a single frame. The slew drive dumps its
  * spin-up into one step, and that spike is not motoring, braking, or generation.
@@ -749,7 +676,6 @@ export function sampleCycle(specs, maxFrames = 5000) {
       alpha: st.alpha,
       phase: st.phase,
       inst: 0,
-      feather: st.feather,
       slip: st.slip,
     };
     frames.push(f);
@@ -806,15 +732,14 @@ export function score(specs, cycles = 2, dt = 0.02) {
   while (st.cycles < 1 && guard++ < cap) step(st, dt);
   if (st.cycles < 1) return null;
   const t0 = st.time;
-  const b = st.mot, c = st.slew, d = st.loss, e = st.stop;
+  const a = st.gen, b = st.mot, c = st.slew, d = st.loss, e = st.stop;
   const target = st.cycles + cycles;
   guard = 0;
   while (st.cycles < target && guard++ < cap * cycles) step(st, dt);
   if (st.cycles < target) return null;
   const T = st.time - t0;
   if (T <= 0) return null;
-  const costs = (st.mot - b) + (st.slew - c) + (st.loss - d) + (st.stop - e);
-  return harvestWatts(st.specs) * (st.specs.eta ?? DRIVE) - costs / T;
+  return (st.gen - a - (st.mot - b) - (st.slew - c) - (st.loss - d) - (st.stop - e)) / T;
 }
 
 /**
@@ -857,23 +782,4 @@ export function solvePlan(specs) {
     }
   }
   return { ...plan, avgW: score({ ...specs, ...plan }) ?? best };
-}
-
-export function phaseLabel(phase) {
-  switch (phase) {
-    case "out":
-      return "Out, face-on";
-    case "brakeOut":
-      return "Slowing out";
-    case "turnEdge":
-      return "Edge-on";
-    case "back":
-      return "Return, edge-on";
-    case "brakeBack":
-      return "Slowing home";
-    case "turnFace":
-      return "Face-on";
-    default:
-      return phase;
-  }
 }

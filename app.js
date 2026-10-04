@@ -2,14 +2,13 @@ import {
   createState,
   defaultSpecs,
   fitError,
-  harvestWatts,
   ranges,
   sizeMachine,
   sampleCycle,
   solvePlan,
   step,
-} from "./sim.js?v=207";
-import { draw, bindCam } from "./view.js?v=207";
+} from "./sim.js?v=219";
+import { draw, bindCam } from "./view.js?v=219";
 
 // v4: the tool opens on the 2×5 m sail already set to its best plan.
 // Older saves would put an unsolved controller back on screen.
@@ -62,6 +61,12 @@ function markBest(s) {
   lastBest = { ...s };
   try {
     localStorage.setItem(KEY + "-best", JSON.stringify(lastBest));
+  } catch (e) {}
+}
+
+function rememberSpecs(s) {
+  try {
+    localStorage.setItem(KEY + "-specs", JSON.stringify(s));
   } catch (e) {}
 }
 
@@ -318,10 +323,10 @@ function paintMeters() {
   mark("peak-home", peaks.home / scale.home, -1);
 }
 
-/** Made grows on the way out and holds on the way home.
- * Net in the trip column is this trip. Last locks when the trip ends.
+/** Trip, Last and Save are the same ledger: energy over the cycle clock.
+ * Made falls on the way home because the clock keeps running after the
+ * coils stop generating. Last locks from the cycle that just closed.
  */
-let madeShown = 0;
 let madeCycle = -1;
 let lastTrip = zeroTrip();
 let saveTrip = loadSave();
@@ -338,31 +343,44 @@ function loadSave() {
   return zeroTrip();
 }
 
+function wattsOf(made, motor, slew, loss, stop, t) {
+  if (!(t > 0)) return zeroTrip();
+  return {
+    made: made / t,
+    motor: motor / t,
+    slew: slew / t,
+    loss: loss / t,
+    stop: stop / t,
+    net: (made - motor - slew - loss - stop) / t,
+  };
+}
+
 function tripScore() {
+  if (scrub != null && cycle && cycle.frames.length) {
+    const i = Math.round(scrub * (cycle.frames.length - 1));
+    const led = cycle.frames[i].ledger;
+    if (led) {
+      liveTrip = { ...led };
+      return liveTrip;
+    }
+  }
   if (state.cycles !== madeCycle) {
-    if (madeCycle >= 0 && state.lastCycleS > 0) lastTrip = { ...liveTrip };
+    if (madeCycle >= 0 && state.lastCycleS > 0) {
+      lastTrip = wattsOf(
+        state.lastGen,
+        state.lastMot,
+        state.lastSlew,
+        state.lastLoss,
+        state.lastStop,
+        state.lastCycleS
+      );
+    }
     madeCycle = state.cycles;
   }
-  const open = state.cycleT > 0.05;
-  const making = open && (state.phase === "out" || state.phase === "brakeOut");
-  if (making) madeShown = harvestWatts(state.specs) * (state.specs.eta ?? 0.98);
-  if (!open) {
-    liveTrip = { made: madeShown, motor: 0, slew: 0, loss: 0, stop: 0, net: 0 };
-    return liveTrip;
-  }
-  const t = state.cycleT;
-  const motor = state.cycleMot / t;
-  const slew = state.cycleSlew / t;
-  const loss = state.cycleLoss / t;
-  const stop = state.cycleStop / t;
-  liveTrip = {
-    made: madeShown,
-    motor,
-    slew,
-    loss,
-    stop,
-    net: madeShown - motor - slew - loss - stop,
-  };
+  liveTrip =
+    state.cycleT > 0.05
+      ? wattsOf(state.cycleGen, state.cycleMot, state.cycleSlew, state.cycleLoss, state.cycleStop, state.cycleT)
+      : wattsOf(state.lastGen, state.lastMot, state.lastSlew, state.lastLoss, state.lastStop, state.lastCycleS);
   return liveTrip;
 }
 
@@ -450,7 +468,7 @@ function setRunning(on) {
       return;
     }
     specs = readForm();
-    localStorage.setItem(KEY + "-specs", JSON.stringify(specs));
+    rememberSpecs(specs);
     state = createState(specs);
     clearScrub();
     running = true;
@@ -563,9 +581,10 @@ document.addEventListener(
   true
 );
 $("defaults").addEventListener("click", () => {
-  if (running) return;
+  if (running) setRunning(false);
   specs = defaultSpecs();
   markBest(specs);
+  rememberSpecs(specs);
   dropCycle();
   clearScrub();
   state = createState(specs);
@@ -574,7 +593,7 @@ $("defaults").addEventListener("click", () => {
   paint();
 });
 $("solve").addEventListener("click", async () => {
-  if (running) return;
+  if (running) setRunning(false);
   const btn = $("solve");
   btn.textContent = "Finding";
   btn.disabled = true;
@@ -590,6 +609,7 @@ $("solve").addEventListener("click", async () => {
       turnLead: plan.turnLead,
     };
     markBest(specs);
+    rememberSpecs(specs);
     dropCycle();
     clearScrub();
     state = createState(specs);
@@ -621,14 +641,6 @@ for (const id of FIELDS) {
 fillForm();
 refreshSpan();
 pin();
-{
-  const tag = $("build-tag");
-  if (tag) {
-    const src = document.querySelector('script[type="module"][src*="app.js"]')?.getAttribute("src") || "";
-    const m = src.match(/\?v=(\d+)/);
-    tag.textContent = m ? "v" + m[1] : "";
-  }
-}
 bindCam($("view"), () => {
   $("cam-hint")?.classList.add("is-gone");
   if (!running) paint();

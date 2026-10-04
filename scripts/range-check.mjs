@@ -1,7 +1,8 @@
 /**
  * The slider ends move with the sail, so the guarantee worth testing is the
  * one the browser enforces for us: whatever a range input is left holding
- * after its min, max and step have moved is still a machine that runs.
+ * after its min, max and step have moved is still a machine that runs, and
+ * Best on that machine must not lose watts.
  *
  * Stubs just enough of an <input type=range> to replay that clamping.
  */
@@ -72,11 +73,15 @@ for (let i = 0; i < 300; i++) {
   if (s.turn < turnFloor(s) - 1e-9) {
     problems.push(`turn ${s.turn}s is faster than the drive can slew ${s.plateW} m`);
   }
-  if (score(s) == null) problems.push(`no cycle: ${JSON.stringify(s)}`);
+  const before = score(s);
+  if (before == null) problems.push(`no cycle: ${JSON.stringify(s)}`);
 
   const plan = solvePlan(s);
   if (plan.turn < turnFloor(s) - 1e-9 || plan.vReturn > lim.vReturn.max + 1e-9) {
     problems.push(`Best returned a plan the machine cannot run: ${JSON.stringify(plan)}`);
+  }
+  if (before != null && plan.avgW < before - 1) {
+    problems.push(`Best lost watts: ${before.toFixed(1)} -> ${plan.avgW.toFixed(1)}`);
   }
 }
 

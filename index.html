@@ -88,7 +88,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=IBM+Plex+Mono:wght@500;600&family=Michroma&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=207" />
+  <link rel="stylesheet" href="styles.css?v=219" />
 </head>
 <body>
   <div class="fit-stage" id="fit-stage">
@@ -101,8 +101,7 @@
         <canvas id="view" aria-label="Sail on the rail. Drag to look around, shift-drag or two fingers to slide along the ground, pinch or scroll to zoom, double-tap to reset."></canvas>
         <p class="view-tag view-wind" id="view-wind">0 m/s</p>
         <p class="view-tag view-area" id="view-area">0 m²</p>
-        <p class="cam-hint" id="cam-hint">drag orbits · shift-drag or two fingers slide</p>
-        <p class="build-tag" id="build-tag" aria-hidden="true"></p>
+        <p class="cam-hint" id="cam-hint">drag to look around · two fingers to slide</p>
         <div class="track-map" id="track-map" role="slider" tabindex="0"
              aria-label="Scrub through one cycle" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
           <i id="map-dot"></i>
@@ -112,8 +111,14 @@
       <div class="lower">
         <div class="deck-main" aria-live="polite">
           <div class="readout">
+            <h2 class="now-h">Now</h2>
+            <div class="trip-heads">
+              <span></span>
+              <h2>Trip</h2>
+              <h2>Last</h2>
+              <h2>Save</h2>
+            </div>
             <section class="now-col">
-              <h2>Now</h2>
               <div class="meter">
                 <div class="meter-top">
                   <span>Power</span>
@@ -150,10 +155,6 @@
             </section>
             <section class="trip-col">
               <div class="trip-table">
-                <span></span>
-                <h2>Trip</h2>
-                <h2>Last</h2>
-                <h2>Save</h2>
                 <span class="lab">net</span>
                 <span id="net">0 W</span>
                 <span id="l-net">0 W</span>
@@ -227,7 +228,7 @@
       </form>
     </div>
   </div>
-  <script type="module" src="app.js?v=207"></script>
+  <script type="module" src="app.js?v=219"></script>
   <script>
     window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
   </script>
