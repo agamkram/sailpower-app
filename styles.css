@@ -220,7 +220,7 @@ header h1 {
 }
 
 .phase-row {
-  justify-content: center;
+  justify-content: flex-start;
   gap: 1.2rem;
 }
 

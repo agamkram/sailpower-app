@@ -8,8 +8,8 @@ import {
   sampleCycle,
   solvePlan,
   step,
-} from "./sim.js?v=141";
-import { draw, bindCam } from "./view.js?v=141";
+} from "./sim.js?v=142";
+import { draw, bindCam } from "./view.js?v=142";
 
 // v3: the reference sail is 2.5×4 m on a 10 m track with a 0.5 s turn.
 // Saved v2 specs would put the old 5×2 m machine back on screen.
@@ -260,7 +260,7 @@ function paintGauge() {
   const use = Math.max(0, -state.inst) / useScale;
   const speed = state.vx >= 0 ? state.vx / outScale : state.vx / backScale;
   const r = Math.max(8, h / 2 - 3);
-  drawRoundDial(ctx, w / 2, h / 2, r, gen, use, speed);
+  drawRoundDial(ctx, r + 2, h / 2, r, gen, use, speed);
 }
 
 /** Top half. -1 is left, 0 is up, 1 is right. */
