@@ -1,32 +1,83 @@
 /** SailPower cycle. +x is downwind. Plate yaw 0 faces the wind, π/2 is edge-on. */
 
 export function defaultSpecs() {
-  return {
+  return sizeMachine({
     wind: 10,
     track: 10,
     gauge: 1,
     plateW: 2,
     plateH: 5,
-    mass: 24,
     sailRho: 1.6,
-    cd: 1.28,
     rho: 1.225,
     thickness: 0.006,
     turn: 0.3,
     turnLead: 0.45,
     coilMode: "limited",
-    fMax: 1000,
-    etaG: 0.95,
-    etaM: 0.95,
     vNoLoad: 22,
     ironRef: 35,
     slewRegen: 0,
-    crr: 0.005,
     vReturn: 8,
     outFrac: 0.2,
+    harvest: 18,
     cuMax: 120,
-    eta: 0.95,
-  };
+  });
+}
+
+/**
+ * Carbon bogie under the sail. The plate's own weight is already in the sail
+ * mass. What is left is the beam across the rail, the slewing ring, the guide
+ * wheels, and the magnets that push with the rail.
+ *
+ * The beam is a thin carbon tube worked at 200 MPa, about a third of what the
+ * fiber takes, so joints and fatigue sit inside the number. Section radius is
+ * 60 mm: deep enough that bending stays light, low enough for a bogie. The
+ * ring is a light alloy slewing bearing, the wheels are small rollers that
+ * grip the rail from every side, and the magnets are a short high-field mover
+ * at 4 kg per kN rather than an iron industrial forcer.
+ */
+const CARBON_STRESS = 200e6;
+const CARBON_RHO = 1600;
+const BOGIE_R = 0.06;
+const PIVOT_H = 0.35;
+const MAGNET_KG_PER_N = 0.004;
+
+export function chassisMass(s, railN) {
+  const push = Math.max(0, holdForce(s));
+  const moment = push * (PIVOT_H + s.plateH / 2);
+  const gauge = Math.max(0.4, s.gauge ?? 1);
+  const beamArea = moment / (CARBON_STRESS * BOGIE_R);
+  const beam = CARBON_RHO * beamArea * gauge;
+  const frame = 1.2 + 4 * beam;
+  const bearing = 1.2 + moment / 800;
+  const wheels = 2 + moment / gauge / 5000;
+  const magnets = MAGNET_KG_PER_N * Math.max(0, railN ?? push);
+  return Math.round((frame + bearing + wheels + magnets) * 10) / 10;
+}
+
+/**
+ * Rail and chassis for this sail in this wind. The rail is the greater of the
+ * push that holds the sail still and the push that shifts the cart at 1 m/s².
+ * The chassis is rebuilt around that rail, then the rail is read again so a
+ * cart that had to grow still has the force to move itself.
+ *
+ * Rolling is steel rollers on the rail: 0.002 of the load. The load is
+ * already the cart's weight plus the sail's push through the guide rollers,
+ * so the coefficient is not inflated a second time.
+ *
+ * The inverter is 98%. Coil copper and iron are already their own loss,
+ * so this is only the power electronics, one stage, each way.
+ */
+const ROLLING = 0.002;
+const DRIVE = 0.98;
+
+export function sizeMachine(s) {
+  const push = holdForce(s);
+  let mass = chassisMass(s, push);
+  // Newtons to shift the whole cart at 1 m/s². Same number as the mass in kg.
+  let fMax = Math.max(push, rig({ ...s, mass }).total);
+  mass = chassisMass(s, fMax);
+  fMax = Math.max(push, rig({ ...s, mass }).total);
+  return { ...s, mass, fMax, crr: ROLLING, eta: DRIVE };
 }
 
 /**
@@ -84,10 +135,11 @@ const SLEW_CP = 0.1;
 /**
  * Everything that follows from the sail's shape rather than just its area.
  * Two sails of equal area behave differently: a wide one is far harder to yaw,
- * a slender one is a bluffer body, and a stubby one drags more air with it.
+ * and a stubby one drags more air with it. The push itself is the harvest.
  *
- * cd       Hoerner's fit for a rectangular plate normal to the flow, with the
- *          Cd spec acting as a trim around the 1.28 reference.
+ * cd       set by harvest. A drag device peaks at one-third of wind speed,
+ *          where the share of the wind kept is Cd×4/27, so Cd is the
+ *          harvest share times 27/4. There is no separate grabbiness.
  * inertia  yaw inertia about the vertical pivot, m*w^2/12. Scales with width
  *          squared, so this is what separates a 5x2 sail from a 2x5 one.
  * added    air entrained when the plate moves normal to itself. Conservative,
@@ -98,7 +150,8 @@ export function rig(s) {
   const span = Math.max(s.plateW, s.plateH);
   const chord = Math.min(s.plateW, s.plateH);
   const ar = Math.min(20, Math.max(1, chord > 0 ? span / chord : 1));
-  const cd = Math.min(2, 1.1 + 0.02 * (ar + 1 / ar)) * (s.cd / 1.28);
+  const h = Math.max(0, s.harvest == null ? 18 : s.harvest) / 100;
+  const cd = h * (27 / 4);
   const sailMass = (s.sailRho ?? 1.6) * area;
   const inertia = (sailMass * s.plateW * s.plateW) / 12;
   const added = s.rho * (Math.PI / 4) * chord * chord * span * (1 - 0.42 / ar ** 0.8);
@@ -149,34 +202,18 @@ export function returnCeiling(s) {
   return best;
 }
 
-/** 1, 2 or 5 times a power of ten, so a slider lands on readable numbers. */
-function niceStep(span) {
-  const pow = 10 ** Math.floor(Math.log10(Math.max(1e-6, span)));
-  const n = span / pow;
-  return (n >= 5 ? 5 : n >= 2 ? 2 : 1) * pow;
-}
-
 /**
- * Slider ends that follow the machine. Fixed ends let you ask for a rail too
- * weak to hold its own sail, a slew faster than any drive could turn it, or a
- * return speed the coils cannot reach. The sail and the wind are free; the
- * drive is sized to them.
+ * Slider ends that follow the machine. The sail and the wind are free. Rail
+ * force and chassis mass are already fixed by sizeMachine. What is left is a
+ * slew no faster than the drive can turn this sail, and a return no faster
+ * than the coils can still hold.
  */
 export function ranges(s) {
-  // Two jobs, and the rail has to do both: hold the sail standing still, or
-  // the stop is the end bumper rather than the coils; and shift the cart at
-  // a metre per second squared, or a tiny sail in light air gets a rail of a
-  // couple of newtons that cannot work the machine at all.
-  const need = Math.max(holdForce(s), rig(s).total * 1);
-  const fStep = niceStep(Math.max(100, need * 3) / 120);
-  const fMin = Math.max(fStep, Math.ceil(need / fStep) * fStep);
-  const fMax = Math.max(fMin + fStep, Math.ceil((need * 3) / fStep) * fStep);
-  const held = { ...s, fMax: clamp(s.fMax ?? fMin, fMin, fMax) };
-  const tMin = Math.max(0.1, Math.ceil(turnFloor(s) * 10) / 10);
+  const sized = sizeMachine(s);
+  const tMin = Math.max(0.1, Math.ceil(turnFloor(sized) * 10) / 10);
   return {
-    fMax: { min: fMin, max: fMax, step: fStep },
     turn: { min: tMin, max: Math.max(tMin + 0.1, 3), step: 0.1 },
-    vReturn: { min: 1, max: returnCeiling(held), step: 0.5 },
+    vReturn: { min: 1, max: returnCeiling(sized), step: 0.5 },
   };
 }
 
@@ -222,7 +259,7 @@ export function fitError(s) {
 }
 
 export function createState(specs) {
-  const s = { ...specs };
+  const s = sizeMachine(specs);
   if (s.eta != null) {
     s.etaG = s.eta;
     s.etaM = s.eta;
@@ -321,6 +358,19 @@ function clamp(v, a, b) {
 function limits(s) {
   const { lo, hi } = stroke(s);
   return { lo, hi };
+}
+
+/** Power in the wind through the sail, watts. */
+export function windPower(s) {
+  const area = Math.max(0, s.plateW * s.plateH);
+  const v = Math.max(0, s.wind);
+  return 0.5 * (s.rho ?? 1.225) * area * v * v * v;
+}
+
+/** Watts kept from that wind. 18 is the drag ceiling. */
+export function harvestWatts(s) {
+  const h = s.harvest == null ? 18 : s.harvest;
+  return (h / 100) * windPower(s);
 }
 
 /** Axial force on the cart, newtons, +x downwind. */
@@ -571,12 +621,17 @@ function sub(st, dt) {
 
   // Bank this step before the cycle is allowed to close, so the closing step
   // belongs to the cycle it finished and the next one starts from zero.
+  // Harvest is the share of the wind through the sail. The inverter keeps
+  // 98% of it on the power stroke. The push is that same share, not a
+  // second drag setting. The return adds none.
   const mech = -fCmd * st.vx;
-  if (mech >= 0) {
-    const e = mech * s.etaG * dt;
+  const harvesting = phase === "out" || phase === "brakeOut";
+  if (harvesting) {
+    const e = harvestWatts(s) * (s.eta ?? DRIVE) * dt;
     st.gen += e;
     st.cycleGen += e;
-  } else {
+  }
+  if (mech < 0) {
     const e = (-mech / s.etaM) * dt;
     st.mot += e;
     st.cycleMot += e;
@@ -751,14 +806,15 @@ export function score(specs, cycles = 2, dt = 0.02) {
   while (st.cycles < 1 && guard++ < cap) step(st, dt);
   if (st.cycles < 1) return null;
   const t0 = st.time;
-  const a = st.gen, b = st.mot, c = st.slew, d = st.loss, e = st.stop;
+  const b = st.mot, c = st.slew, d = st.loss, e = st.stop;
   const target = st.cycles + cycles;
   guard = 0;
   while (st.cycles < target && guard++ < cap * cycles) step(st, dt);
   if (st.cycles < target) return null;
   const T = st.time - t0;
   if (T <= 0) return null;
-  return (st.gen - a - (st.mot - b) - (st.slew - c) - (st.loss - d) - (st.stop - e)) / T;
+  const costs = (st.mot - b) + (st.slew - c) + (st.loss - d) + (st.stop - e);
+  return harvestWatts(st.specs) * (st.specs.eta ?? DRIVE) - costs / T;
 }
 
 /**

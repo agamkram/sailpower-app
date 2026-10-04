@@ -5,7 +5,7 @@
  *
  * Stubs just enough of an <input type=range> to replay that clamping.
  */
-import { defaultSpecs, fitError, ranges, score, solvePlan, turnFloor } from "../sim.js";
+import { defaultSpecs, fitError, ranges, score, sizeMachine, solvePlan, turnFloor } from "../sim.js";
 
 /** What an <input type=range> does to its value when min/max/step move. */
 function clampLikeInput(value, { min, max, step }) {
@@ -15,16 +15,15 @@ function clampLikeInput(value, { min, max, step }) {
 
 /** One round of what app.js does: move the ends, let the inputs clamp. */
 function settle(specs) {
-  let s = { ...specs };
-  // Twice, because the return speed's ceiling depends on the clamped rail.
+  let s = sizeMachine(specs);
+  // Twice, because the return ceiling is read off the sized rail.
   for (let i = 0; i < 2; i++) {
     const lim = ranges(s);
-    s = {
+    s = sizeMachine({
       ...s,
-      fMax: clampLikeInput(s.fMax, lim.fMax),
       turn: clampLikeInput(s.turn, lim.turn),
       vReturn: clampLikeInput(s.vReturn, lim.vReturn),
-    };
+    });
   }
   return s;
 }
@@ -48,7 +47,7 @@ for (let i = 0; i < 300; i++) {
     track: pick(8, 40, 1),
     mass: pick(10, 200, 1),
     outFrac: pick(0.15, 0.6, 0.01),
-    cd: pick(0.6, 2, 0.02),
+    harvest: pick(0, 100, 5),
     eta: pick(0.5, 0.98, 0.01),
     crr: pick(0.001, 0.04, 0.001),
     fMax: pick(200, 3000, 50),
@@ -60,8 +59,13 @@ for (let i = 0; i < 300; i++) {
   tested++;
 
   const lim = ranges(s);
+  const built = sizeMachine(s);
+  if (Math.abs(s.mass - built.mass) > 1e-9 || Math.abs(s.fMax - built.fMax) > 1e-6 || s.crr !== built.crr || s.eta !== built.eta) {
+    problems.push(`stale chassis, rail, or rolling survived: ${JSON.stringify(s)}`);
+    continue;
+  }
   const at = (k) => s[k] >= lim[k].min - 1e-9 && s[k] <= lim[k].max + 1e-9;
-  if (!at("fMax") || !at("turn") || !at("vReturn")) {
+  if (!at("turn") || !at("vReturn")) {
     problems.push(`settling did not converge: ${JSON.stringify(s)}`);
     continue;
   }

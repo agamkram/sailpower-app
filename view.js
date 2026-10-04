@@ -1,6 +1,6 @@
 /** Side view of the machine. Face-on sail is the thin plate. Edge-on sail faces the camera. */
 
-import { stroke } from "./sim.js?v=188";
+import { stroke } from "./sim.js?v=207";
 
 function sub(a, b) {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -409,9 +409,44 @@ const STARS = (() => {
   return out;
 })();
 
-/** Flat ground on y = 0, night sky above the horizon. Neither knows about the screen. */
+/** Flat ground on y = 0, night sky above the horizon. Neither knows about the screen.
+ * The stars and grass only change when the camera turns, so they are painted
+ * once and copied. Redrawing 1100 stars every frame was heating the phone
+ * while the cart sat still.
+ */
+let skyCanvas = null;
+let skyCtx = null;
+let skyKey = "";
+
 function paintWorld(ctx, cam) {
   const y = horizonY(cam);
+  const { w, h } = cam;
+  const key = [
+    w,
+    h,
+    Math.round(y * 2),
+    Math.round(cam.zaxis[0] * 1e4),
+    Math.round(cam.zaxis[1] * 1e4),
+    Math.round(cam.zaxis[2] * 1e4),
+    Math.round(cam.xaxis[0] * 1e4),
+    Math.round(cam.fLen),
+  ].join(",");
+  if (!skyCanvas || skyKey !== key) {
+    skyKey = key;
+    if (!skyCanvas) {
+      skyCanvas = document.createElement("canvas");
+      skyCtx = skyCanvas.getContext("2d");
+    }
+    const dpr = ctx.getTransform().a || 1;
+    skyCanvas.width = Math.max(1, Math.floor(w * dpr));
+    skyCanvas.height = Math.max(1, Math.floor(h * dpr));
+    skyCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    paintSkyField(skyCtx, cam, y);
+  }
+  ctx.drawImage(skyCanvas, 0, 0, w, h);
+}
+
+function paintSkyField(ctx, cam, y) {
   const { w, h } = cam;
 
   const paintSky = (top, bot) => {
@@ -744,7 +779,7 @@ export function draw(canvas, st) {
     const far = fitted * 0.85;
     follow = Math.min(1, Math.max(0, (far - camCtl.dist) / Math.max(0.2, far - near)));
   }
-  const railEye = 0.45;
+  const railEye = 0.85;
   const sink = Math.max(0, -camCtl.pitch);
   const targetY = aimY - sink * Math.max(0, aimY - railEye);
   const target = [
@@ -817,7 +852,7 @@ export function draw(canvas, st) {
       area += a.x * b.y - b.x * a.y;
     }
     area = Math.abs(area) * 0.5;
-    if (area < 0.35) return;
+    if (area < 0.05) return;
     // A close sail fills the screen and its edges are long. Only a corner
     // that has crossed the lens blows an edge out far enough to drop.
     if (maxEdge > Math.hypot(w, h) * 40) return;
@@ -919,6 +954,29 @@ export function draw(canvas, st) {
     const ks = [0.62, 1.08, 0.78, 0.92, 0.7, 0.98];
     faces.forEach((face, i) => add(face.map((k) => P[k]), shade(color, ks[i]), layer));
   }
+  function stop(x) {
+    const ks = [0.82, 1.05, 0.9, 0.96, 0.86, 1];
+    const hx = 0.08;
+    const hy = 0.16;
+    const hz = (gauge + 0.16) / 2;
+    const P = [];
+    for (const dx of [-hx, hx]) {
+      for (const dy of [-hy, hy]) {
+        for (const dz of [-hz, hz]) {
+          P.push([x + dx, railY + 0.1 + dy, dz]);
+        }
+      }
+    }
+    const faces = [
+      [0, 1, 5, 4],
+      [2, 6, 7, 3],
+      [0, 4, 6, 2],
+      [1, 3, 7, 5],
+      [0, 2, 3, 1],
+      [4, 5, 7, 6],
+    ];
+    faces.forEach((face, i) => add(face.map((k) => P[k]), shade(STOP, ks[i]), 1));
+  }
 
   const railR = 0.05;
   const railY = 0.2;
@@ -954,8 +1012,8 @@ export function draw(canvas, st) {
     xLo = followX - 12;
     xHi = followX + 12;
   }
-  const rail0 = Math.max(cap0 - 0.05, xLo);
-  const rail1 = Math.min(cap1 + 0.05, xHi);
+  const rail0 = xLo <= cap0 + 0.5 ? cap0 - 0.04 : Math.max(cap0 - 0.04, xLo);
+  const rail1 = xHi >= cap1 - 0.5 ? cap1 + 0.04 : Math.min(cap1 + 0.04, xHi);
 
   // Keep every rung. Dropping the ones near the cart made the ladder vanish
   // under the bogie and pop back in once it had passed.
@@ -965,8 +1023,8 @@ export function draw(canvas, st) {
     wheel([x, railY - 0.012, 0], "z", 0.02, gauge - railR * 2 - 0.02, RUNG, 0, false, true, 2, true);
   }
 
-  if (rail0 <= cap0 + 0.4) box(cap0, railY + 0.1, 0, 0.07, 0.32, gauge + 0.16, 0, STOP);
-  if (rail1 >= cap1 - 0.4) box(cap1, railY + 0.1, 0, 0.07, 0.32, gauge + 0.16, 0, STOP);
+  if (rail0 <= cap0 + 0.15) stop(cap0);
+  if (rail1 >= cap1 - 0.15) stop(cap1);
 
   const rails = [
     { y: railY, z: -gauge / 2, r: railR, color: RAIL },

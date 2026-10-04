@@ -88,7 +88,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=IBM+Plex+Mono:wght@500;600&family=Michroma&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=188" />
+  <link rel="stylesheet" href="styles.css?v=207" />
 </head>
 <body>
   <div class="fit-stage" id="fit-stage">
@@ -99,6 +99,8 @@
 
       <div class="stage-wrap">
         <canvas id="view" aria-label="Sail on the rail. Drag to look around, shift-drag or two fingers to slide along the ground, pinch or scroll to zoom, double-tap to reset."></canvas>
+        <p class="view-tag view-wind" id="view-wind">0 m/s</p>
+        <p class="view-tag view-area" id="view-area">0 m²</p>
         <p class="cam-hint" id="cam-hint">drag orbits · shift-drag or two fingers slide</p>
         <p class="build-tag" id="build-tag" aria-hidden="true"></p>
         <div class="track-map" id="track-map" role="slider" tabindex="0"
@@ -112,25 +114,78 @@
           <div class="readout">
             <section class="now-col">
               <h2>Now</h2>
-              <p class="big" id="watts">0 W</p>
-              <p class="sub" id="speed">0.0 m/s</p>
+              <div class="meter">
+                <div class="meter-top">
+                  <span>Power</span>
+                  <span id="watts">0 W</span>
+                </div>
+                <div class="meter-track">
+                  <i class="bar make full" id="bar-make"></i>
+                  <i class="peak" id="peak-make"></i>
+                </div>
+              </div>
+              <div class="meter">
+                <div class="meter-top">
+                  <span>Motor</span>
+                  <span id="motor">0 W</span>
+                </div>
+                <div class="meter-track">
+                  <i class="bar use full" id="bar-motor"></i>
+                  <i class="peak" id="peak-motor"></i>
+                </div>
+              </div>
+              <div class="meter">
+                <div class="meter-top">
+                  <span>Speed</span>
+                  <span id="speed">0.0 m/s</span>
+                </div>
+                <div class="meter-track">
+                  <i class="bar home" id="bar-home"></i>
+                  <i class="bar out" id="bar-out"></i>
+                  <i class="peak home" id="peak-home"></i>
+                  <i class="peak out" id="peak-out"></i>
+                  <i class="zero"></i>
+                </div>
+              </div>
             </section>
             <section class="trip-col">
-              <h2>Trip</h2>
-              <p class="big" id="net">—</p>
-              <dl class="score-rows">
-                <div><dt>made</dt><dd id="t-made">—</dd></div>
-                <div><dt>motor</dt><dd id="t-motor">—</dd></div>
-                <div><dt>slew</dt><dd id="t-slew">—</dd></div>
-                <div><dt>loss</dt><dd id="t-loss">—</dd></div>
-                <div><dt>stops</dt><dd id="t-stop">—</dd></div>
-              </dl>
+              <div class="trip-table">
+                <span></span>
+                <h2>Trip</h2>
+                <h2>Last</h2>
+                <h2>Save</h2>
+                <span class="lab">net</span>
+                <span id="net">0 W</span>
+                <span id="l-net">0 W</span>
+                <span id="s-net">0 W</span>
+                <span class="lab">made</span>
+                <span id="t-made">0 W</span>
+                <span id="l-made">0 W</span>
+                <span id="s-made">0 W</span>
+                <span class="lab">motor</span>
+                <span id="t-motor">0 W</span>
+                <span id="l-motor">0 W</span>
+                <span id="s-motor">0 W</span>
+                <span class="lab">slew</span>
+                <span id="t-slew">0 W</span>
+                <span id="l-slew">0 W</span>
+                <span id="s-slew">0 W</span>
+                <span class="lab">loss</span>
+                <span id="t-loss">0 W</span>
+                <span id="l-loss">0 W</span>
+                <span id="s-loss">0 W</span>
+                <span class="lab">stops</span>
+                <span id="t-stop">0 W</span>
+                <span id="l-stop">0 W</span>
+                <span id="s-stop">0 W</span>
+              </div>
             </section>
           </div>
           <p class="warn" id="warn"></p>
           <div class="actions">
             <button type="button" class="go" id="run">Run</button>
             <button type="button" id="specs-btn">Specs</button>
+            <button type="button" id="save-btn">Save</button>
           </div>
         </div>
       </div>
@@ -152,9 +207,6 @@
         <label class="field">Track <output id="o-track"></output>
           <input id="track" type="range" min="8" max="40" step="1" />
         </label>
-        <label class="field">Chassis <output id="o-mass"></output>
-          <input id="mass" type="range" min="10" max="200" step="1" />
-        </label>
         <label class="field">Out speed <output id="o-outFrac"></output>
           <input id="outFrac" type="range" min="0.15" max="0.6" step="0.01" />
         </label>
@@ -164,17 +216,8 @@
         <label class="field">Turn <output id="o-turn"></output>
           <input id="turn" type="range" min="0.2" max="3" step="0.1" data-adaptive />
         </label>
-        <label class="field">Rail force <output id="o-fMax"></output>
-          <input id="fMax" type="range" min="720" max="2150" step="10" data-adaptive />
-        </label>
-        <label class="field">Drag <output id="o-cd"></output>
-          <input id="cd" type="range" min="0.6" max="2" step="0.02" />
-        </label>
-        <label class="field">Efficiency <output id="o-eta"></output>
-          <input id="eta" type="range" min="0.5" max="0.98" step="0.01" />
-        </label>
-        <label class="field">Rolling <output id="o-crr"></output>
-          <input id="crr" type="range" min="0.001" max="0.04" step="0.001" />
+        <label class="field">Harvest <output id="o-harvest"></output>
+          <input id="harvest" type="range" min="0" max="100" step="1" />
         </label>
         <div class="sheet-actions">
           <button type="button" id="solve">Best</button>
@@ -184,7 +227,7 @@
       </form>
     </div>
   </div>
-  <script type="module" src="app.js?v=188"></script>
+  <script type="module" src="app.js?v=207"></script>
   <script>
     window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
   </script>

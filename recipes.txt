@@ -1,6 +1,6 @@
 SailPower model notes
-Wind 10 m/s, sail 5x2 m, 24 kg chassis plus a 16 kg sail, rail 1000 N,
-track 20 m. Figures are three steady cycles after the first, averaged over the
+Wind 10 m/s, sail 2×5 m, 11.3 kg chassis plus a 16 kg sail, rail 714 N,
+track 10 m. Figures are three steady cycles after the first, averaged over the
 whole cycle including time at rest.
 
 The rotation plan
@@ -53,17 +53,21 @@ instead of the coils. Turn went down to 0.2 s for every sail, and an 8 m plate
 needs 53 kN m to move that fast. Return speed went to 16 m/s with no regard
 for motoring force, which droops with back-EMF and is gone by 22 m/s.
 
-The sail and the wind are free. The drive is sized to them, so the three drive
-sliders move their own ends:
+The sail and the wind are free. The cart under the sail and the rail that
+holds it are sized to them, so neither is a slider.
 
-  rail force  from what holds the sail standing still, to three times that.
-              Also never below what shifts the all-up mass at 1 m/s2, or a
-              tiny sail in light air got a rail of two newtons
-  turn        no quicker than the slew drive can manage at 150 N m per m2 of
-              sail. That works out at 0.075 s per metre of width whatever the
-              drive is sized to, so 0.15 s for a 2 m sail and 0.6 s for an 8 m
-  return      no faster than the coils can still hold against the edge-on drag
-              with most of the force left over as margin
+  chassis    the lightest carbon bogie that can carry this sail in this wind.
+             The plate's own mass is separate. The bogie is a 60 mm carbon
+             tube worked at 200 MPa, a light slewing ring, the guide wheels,
+             and a short magnet mover at 4 kg per kN of rail force. At the
+             default that is 11.3 kg under a 16 kg sail.
+  rail force the push that holds the sail standing still, and never below the
+             push that shifts the whole cart at 1 m/s². At the default, 714 N.
+  turn       no quicker than the slew drive can manage at 150 N m per m2 of
+             sail. That works out at 0.075 s per metre of width whatever the
+             drive is sized to, so 0.15 s for a 2 m sail and 0.6 s for an 8 m
+  return     no faster than the coils can still hold against the edge-on drag
+             with most of the force left over as margin
 
 Best only offers plans inside those ends. scripts/range-check.mjs replays what
 a range input does to its own value when the ends move, and checks that what
@@ -78,17 +82,17 @@ machine in the space.
 
 The cart is captive: the bogie grips the rail from above, below and both
 sides, so the overturning moment from the sail is a guide-wheel load and not a
-tipping failure. At the default it is about eleven times what the weight alone
-would resist. That load is still not charged for.
+tipping failure. At the default it is about fifteen times what the weight alone
+would resist. That load is still not charged for, apart from the rolling it
+adds.
 
 Forces and losses
 -----------------
 Carried:
 
   aero        flat plate, cos^2 law on yaw, plus edge and skin terms
-  Cd          Hoerner's fit, 1.1 + 0.02(AR + 1/AR). A square plate is the
-              bluffest at 1.14, slenderness lifts it to 1.30 by AR 10. The Cd
-              spec is a trim around that, not the value
+  Cd          from harvest. At one-third of wind speed the share kept is
+              Cd×4/27, so Cd = harvest × 27/4. 18% is Cd 1.22. No slider.
   yaw inertia m*w^2/12 about the vertical pivot, width squared
   added air   rho*(pi/4)*c^2*b with a slenderness factor, acting as cos^2 of
               yaw. Conservative, so it moves timing and peak force, not the watt-seconds
@@ -96,11 +100,16 @@ Carried:
               and no recovery on spin-down because a geared slew drive is not
               back-drivable. slewRegen buys that back if the drive is direct
   droop       motoring force falls as back-EMF rises and reaches zero at
-              vNoLoad. Braking is thermal only, so it keeps the full 1000 N
+              vNoLoad. Braking is thermal only, so it keeps the full rated force
   copper      cuMax*(F/fMax)^2 at every speed, not only while parked
   iron        ironRef*(v/10)^2
-  rolling     crr against weight plus the sail thrust reacted through the
-              guide rollers, which at 10 m/s is about twice the weight
+  inverter    98% each way. Copper and iron are already counted, so this is
+              only the power electronics. Not a slider.
+  harvest     share of the wind's power through the sail. 0 to 100, default
+              18. The push is that same share. The inverter keeps 98% of it.
+  rolling     steel rollers on the rail, 0.002 of the load. The load is the
+              cart's weight plus the sail's push through the guide rollers.
+              Not a slider.
   end stops   watt-seconds absorbed by a stop are charged, not deleted
   feathering  a stopping aid, not a cruise setting. Out on the power stroke a
               sail that out-pushes the coils just drives the cart faster until
@@ -109,16 +118,16 @@ Carried:
 
 Budget at the default, in watts:
 
-  made          705
-  motor home   -144
+  made         1080
+  motor home   -160
   slew drive    -47
-  copper+iron   -26
-  end stops      -3
-  net           484     cycle 11.8 s
+  copper+iron   -51
+  end stops      -4
+  net           818     cycle 6.4 s
 
 Not carried: wind shear and gusts, unsteady aerodynamics beyond added mass,
 side force and the overturning moment on the guide wheels, sail flex, thermal
-derating, and any cost for the structure itself.
+derating, and any money cost for the structure. Its mass is in the cart.
 
 Sail shape
 ----------

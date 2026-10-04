@@ -2,19 +2,19 @@ import {
   createState,
   defaultSpecs,
   fitError,
-  holdForce,
+  harvestWatts,
   ranges,
-  rig,
+  sizeMachine,
   sampleCycle,
   solvePlan,
   step,
-} from "./sim.js?v=188";
-import { draw, bindCam } from "./view.js?v=188";
+} from "./sim.js?v=207";
+import { draw, bindCam } from "./view.js?v=207";
 
 // v4: the tool opens on the 2×5 m sail already set to its best plan.
 // Older saves would put an unsolved controller back on screen.
 const KEY = "sailpower-v1";
-const FIELDS = ["wind", "plateW", "plateH", "track", "mass", "outFrac", "vReturn", "turn", "fMax", "cd", "eta", "crr"];
+const FIELDS = ["wind", "plateW", "plateH", "track", "outFrac", "vReturn", "turn", "harvest"];
 
 let specs = loadSpecs();
 let lastBest = loadBest(specs);
@@ -31,6 +31,13 @@ let scrub = null;
 let postedW = null;
 let postedV = null;
 let postedScore = "";
+// Peak marks. The scale stays the sampled trip, so a longer bar is always
+// more. A mark stays at the hardest reading until the trip ends.
+const peaks = { make: 0, use: 0, motor: 0, out: 0, home: 0 };
+let peakCycle = 0;
+let postedM = null;
+let motorMark = null;
+let motorW = 0;
 
 const $ = (id) => document.getElementById(id);
 
@@ -38,7 +45,7 @@ function loadSpecs() {
   const base = defaultSpecs();
   try {
     const saved = JSON.parse(localStorage.getItem(KEY + "-specs") || "null");
-    if (saved && typeof saved === "object") return { ...base, ...saved };
+    if (saved && typeof saved === "object") return sizeMachine({ ...base, ...saved });
   } catch (e) {}
   return base;
 }
@@ -104,7 +111,7 @@ function readForm() {
   for (const id of FIELDS) {
     next[id] = Number($(id).value);
   }
-  return next;
+  return sizeMachine(next);
 }
 
 /**
@@ -131,24 +138,19 @@ function paintForm() {
   applyRanges(readForm());
   const s = readForm();
   $("o-wind").textContent = s.wind.toFixed(1) + " m/s";
+  $("view-wind").textContent = s.wind.toFixed(1) + " m/s";
   $("o-plateW").textContent = s.plateW.toFixed(1) + " m";
   $("o-plateH").textContent = s.plateH.toFixed(1) + " m";
-  $("o-area").textContent = (s.plateW * s.plateH).toFixed(1) + " m²";
+  const area = (s.plateW * s.plateH).toFixed(1) + " m²";
+  $("o-area").textContent = area;
+  $("view-area").textContent = area;
   $("o-track").textContent = s.track.toFixed(0) + " m";
-  const r = rig(s);
-  $("o-mass").textContent = s.mass.toFixed(0) + " kg · " + r.total.toFixed(0) + " all up";
   const frac = s.outFrac;
   $("o-outFrac").textContent =
     Math.abs(frac - 1 / 3) < 0.012 ? "1/3 wind" : (frac * s.wind).toFixed(1) + " m/s";
   $("o-vReturn").textContent = s.vReturn.toFixed(1) + " m/s";
   $("o-turn").textContent = s.turn.toFixed(1) + " s";
-  // Against the sail it has to hold, so a rail that is only just big enough
-  // reads as one rather than looking like any other number of newtons.
-  $("o-fMax").textContent =
-    s.fMax.toFixed(0) + " N · " + (s.fMax / Math.max(1, holdForce(s))).toFixed(1) + "× hold";
-  $("o-cd").textContent = r.cd.toFixed(2);
-  $("o-eta").textContent = Math.round(s.eta * 100) + "%";
-  $("o-crr").textContent = s.crr.toFixed(3);
+  $("o-harvest").textContent = Math.round(s.harvest) + "% of the wind";
   $("warn").textContent = fitError(s);
   let off = false;
   for (const id of FIELDS) {
@@ -207,17 +209,17 @@ function fmtW(w) {
 
 function paint() {
   const dur = cycle ? cycle.seconds : state.lastCycleS;
-  if (scrub != null || postedW == null || Math.abs(state.inst - postedW) >= 40) {
-    postedW = state.inst;
+  if (scrub != null || postedW == null || Math.abs(Math.max(0, state.inst) - postedW) >= 40) {
+    postedW = Math.max(0, state.inst);
     $("watts").textContent = fmtW(postedW);
-    $("watts").style.color = postedW >= 0 ? "var(--green)" : "var(--amber)";
+    $("watts").style.color = "var(--green)";
   }
   if (scrub != null || postedV == null || Math.abs(state.vx - postedV) >= 0.2) {
     postedV = state.vx;
-    const way = state.vx > 0.2 ? " out" : state.vx < -0.2 ? " home" : "";
-    $("speed").textContent = postedV.toFixed(1) + " m/s" + way;
+    $("speed").textContent = Math.abs(postedV).toFixed(1) + " m/s";
   }
   paintScore();
+  paintMeters();
   let frac;
   if (scrub != null) frac = scrub;
   else if (dur > 0) frac = Math.min(1, state.cycleT / dur);
@@ -228,52 +230,174 @@ function paint() {
   draw($("view"), state);
 }
 
-/** The last finished trip. Until one has actually run, every line is zero. */
-function tripScore() {
-  if (state.cycles >= 1 && state.lastCycleS > 0) {
-    const t = state.lastCycleS;
-    return {
-      made: state.lastGen / t,
-      motor: state.lastMot / t,
-      slew: state.lastSlew / t,
-      loss: state.lastLoss / t,
-      stop: state.lastStop / t,
-      net: state.lastCycleNet / t,
-    };
+function meterScale() {
+  if (scaleKey === cycleKey && cachedScale) return cachedScale;
+  scaleKey = cycleKey;
+  peaks.make = peaks.use = peaks.motor = peaks.out = peaks.home = 0;
+  motorMark = null;
+  motorW = 0;
+  let make = 1;
+  let use = 1;
+  let out = Math.max(0.5, Math.abs(specs.wind * specs.outFrac));
+  let home = Math.max(0.5, Math.abs(specs.vReturn));
+  let motor = 1;
+  const frames = cycle && cycle.frames;
+  if (frames) {
+    for (const f of frames) {
+      if (f.inst > make) make = f.inst;
+      if (f.inst < 0 && -f.inst > use) use = -f.inst;
+      if (f.vx > out) out = f.vx;
+      if (f.vx < 0 && -f.vx > home) home = -f.vx;
+      if (f.rate && f.rate.motor > motor) motor = f.rate.motor;
+    }
   }
+  cachedScale = { make, use, motor, out, home };
+  return cachedScale;
+}
+
+let scaleKey = "";
+let cachedScale = null;
+
+function hold(name, value) {
+  if (value > peaks[name]) peaks[name] = value;
+}
+
+function motorNow() {
+  if (scrub != null && cycle && cycle.frames.length) {
+    const i = Math.round(scrub * (cycle.frames.length - 1));
+    const rate = cycle.frames[i].rate;
+    return Math.max(0, rate ? rate.motor : 0);
+  }
+  if (!motorMark || state.time < motorMark.t) {
+    motorMark = { t: state.time, mot: state.mot };
+    motorW = 0;
+    return 0;
+  }
+  const dt = state.time - motorMark.t;
+  if (dt < 1e-4) return motorW;
+  const raw = Math.max(0, (state.mot - motorMark.mot) / dt);
+  motorMark = { t: state.time, mot: state.mot };
+  const a = 1 - Math.exp(-dt / 0.12);
+  motorW += (raw - motorW) * a;
+  return motorW;
+}
+
+function paintMeters() {
+  if (state.cycles !== peakCycle) {
+    peakCycle = state.cycles;
+    peaks.make = peaks.use = peaks.motor = peaks.out = peaks.home = 0;
+  }
+  const scale = meterScale();
+  const make = Math.max(0, state.inst);
+  const motor = motorNow();
+  const out = Math.max(0, state.vx);
+  const home = Math.max(0, -state.vx);
+  hold("make", make);
+  hold("motor", motor);
+  hold("out", out);
+  hold("home", home);
+  if (scrub != null || postedM == null || Math.abs(motor - postedM) >= 20) {
+    postedM = motor;
+    $("motor").textContent = fmtW(-motor);
+    $("motor").style.color = motor > 1 ? "var(--amber)" : "var(--text)";
+  }
+  const slip = (id, frac) => {
+    $(id).style.transform = "scaleX(" + Math.max(0, Math.min(1, frac)) + ")";
+  };
+  const mark = (id, frac, side) => {
+    const f = Math.max(0, Math.min(1, frac));
+    $(id).style.left = (side === 0 ? f * 100 : side > 0 ? 50 + f * 50 : 50 - f * 50) + "%";
+  };
+  slip("bar-make", make / scale.make);
+  slip("bar-motor", motor / scale.motor);
+  slip("bar-out", out / scale.out);
+  slip("bar-home", home / scale.home);
+  mark("peak-make", peaks.make / scale.make, 0);
+  mark("peak-motor", peaks.motor / scale.motor, 0);
+  mark("peak-out", peaks.out / scale.out, 1);
+  mark("peak-home", peaks.home / scale.home, -1);
+}
+
+/** Made grows on the way out and holds on the way home.
+ * Net in the trip column is this trip. Last locks when the trip ends.
+ */
+let madeShown = 0;
+let madeCycle = -1;
+let lastTrip = zeroTrip();
+let saveTrip = loadSave();
+
+function zeroTrip() {
   return { made: 0, motor: 0, slew: 0, loss: 0, stop: 0, net: 0 };
 }
 
+function loadSave() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(KEY + "-save") || "null");
+    if (saved && typeof saved.net === "number") return saved;
+  } catch (e) {}
+  return zeroTrip();
+}
+
+function tripScore() {
+  if (state.cycles !== madeCycle) {
+    if (madeCycle >= 0 && state.lastCycleS > 0) lastTrip = { ...liveTrip };
+    madeCycle = state.cycles;
+  }
+  const open = state.cycleT > 0.05;
+  const making = open && (state.phase === "out" || state.phase === "brakeOut");
+  if (making) madeShown = harvestWatts(state.specs) * (state.specs.eta ?? 0.98);
+  if (!open) {
+    liveTrip = { made: madeShown, motor: 0, slew: 0, loss: 0, stop: 0, net: 0 };
+    return liveTrip;
+  }
+  const t = state.cycleT;
+  const motor = state.cycleMot / t;
+  const slew = state.cycleSlew / t;
+  const loss = state.cycleLoss / t;
+  const stop = state.cycleStop / t;
+  liveTrip = {
+    made: madeShown,
+    motor,
+    slew,
+    loss,
+    stop,
+    net: madeShown - motor - slew - loss - stop,
+  };
+  return liveTrip;
+}
+
+let liveTrip = zeroTrip();
+
 function paintScore() {
   const t = tripScore();
-  const parts = t
-    ? [
-        ["net", t.net],
-        ["t-made", t.made],
-        ["t-motor", -t.motor],
-        ["t-slew", -t.slew],
-        ["t-loss", -t.loss],
-        ["t-stop", -t.stop],
-      ]
-    : [
-        ["net", null],
-        ["t-made", null],
-        ["t-motor", null],
-        ["t-slew", null],
-        ["t-loss", null],
-        ["t-stop", null],
-      ];
-  const key = parts.map((p) => (p[1] == null ? "—" : Math.round(p[1]))).join("|");
+  const cells = [];
+  const add = (id, trip, row) => {
+    const raw = trip[row === "stop" ? "stop" : row];
+    const watts = row === "made" || row === "net" ? raw : -raw;
+    cells.push([id, watts, row === "net"]);
+  };
+  add("net", t, "net");
+  add("l-net", lastTrip, "net");
+  add("s-net", saveTrip, "net");
+  for (const row of ["made", "motor", "slew", "loss", "stop"]) {
+    const id = row === "stop" ? "stop" : row;
+    add("t-" + id, t, row);
+    add("l-" + id, lastTrip, row);
+    add("s-" + id, saveTrip, row);
+  }
+  const key = cells.map((c) => Math.round(c[1])).join("|");
   if (key === postedScore) return;
   postedScore = key;
-  for (const [id, watts] of parts) {
+  for (const [id, watts, isNet] of cells) {
     const el = $(id);
-    el.textContent = watts == null ? "—" : fmtW(watts);
-    if (id === "net") el.style.color = watts == null || watts >= 0 ? "var(--green)" : "var(--amber)";
+    if (!el) continue;
+    el.textContent = fmtW(watts);
+    if (isNet) el.style.color = watts >= 0 ? "var(--green)" : "var(--amber)";
   }
 }
 
 let raf = 0;
+let idleTimer = 0;
 
 function frame(t) {
   if (running) {
@@ -284,24 +408,39 @@ function frame(t) {
     last = t;
   }
   paint();
-  raf = document.hidden ? 0 : requestAnimationFrame(frame);
+  if (document.hidden) {
+    raf = 0;
+    return;
+  }
+  // The wind keeps moving while the cart is stopped, but it does not need
+  // a full phone refresh. Half rate is the difference between warm and hot.
+  if (running) raf = requestAnimationFrame(frame);
+  else {
+    idleTimer = setTimeout(() => {
+      idleTimer = 0;
+      raf = requestAnimationFrame(frame);
+    }, 32);
+  }
 }
 
 function startLoop() {
-  if (raf || document.hidden) return;
+  if (raf || idleTimer || document.hidden) return;
   last = 0;
   raf = requestAnimationFrame(frame);
 }
 
 function stopLoop() {
   cancelAnimationFrame(raf);
+  clearTimeout(idleTimer);
   raf = 0;
+  idleTimer = 0;
 }
 
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) stopLoop();
   else startLoop();
 });
+window.addEventListener("pagehide", stopLoop);
 
 function setRunning(on) {
   if (on) {
@@ -385,7 +524,29 @@ map.addEventListener("keydown", (e) => {
   e.preventDefault();
 });
 
+function paintSaveButton() {
+  $("save-btn").textContent = saveTrip.made || saveTrip.net ? "Clear" : "Save";
+}
+
 $("run").addEventListener("click", () => setRunning(!running));
+$("save-btn").addEventListener("click", () => {
+  if (saveTrip.made || saveTrip.net) {
+    saveTrip = zeroTrip();
+    try {
+      localStorage.removeItem(KEY + "-save");
+    } catch (e) {}
+  } else {
+    const shot = lastTrip.made || lastTrip.net ? lastTrip : liveTrip;
+    saveTrip = { ...shot, specs: { ...state.specs } };
+    try {
+      localStorage.setItem(KEY + "-save", JSON.stringify(saveTrip));
+    } catch (e) {}
+  }
+  paintSaveButton();
+  postedScore = "";
+  paintScore();
+});
+paintSaveButton();
 $("specs-btn").addEventListener("click", () => {
   $("sheet").hidden = !$("sheet").hidden;
 });
