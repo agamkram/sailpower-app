@@ -44,6 +44,43 @@ speed instead.
 Presets vary turnLead alone, so the selector compares turn timing and nothing
 else. Everything else is a spec slider.
 
+Sliders that fit each other
+---------------------------
+The sliders were ranged one at a time, so they did not describe one machine.
+Rail force stopped at 3000 N while the biggest sail in the strongest wind
+pushes about 17600, which is how a wide sail came to be braked by the end stop
+instead of the coils. Turn went down to 0.2 s for every sail, and an 8 m plate
+needs 53 kN m to move that fast. Return speed went to 16 m/s with no regard
+for motoring force, which droops with back-EMF and is gone by 22 m/s.
+
+The sail and the wind are free. The drive is sized to them, so the three drive
+sliders move their own ends:
+
+  rail force  from what holds the sail standing still, to three times that.
+              Also never below what shifts the all-up mass at 1 m/s2, or a
+              tiny sail in light air got a rail of two newtons
+  turn        no quicker than the slew drive can manage at 150 N m per m2 of
+              sail. That works out at 0.075 s per metre of width whatever the
+              drive is sized to, so 0.15 s for a 2 m sail and 0.6 s for an 8 m
+  return      no faster than the coils can still hold against the edge-on drag
+              with most of the force left over as margin
+
+Best only offers plans inside those ends. scripts/range-check.mjs replays what
+a range input does to its own value when the ends move, and checks that what
+is left is still a machine that completes a cycle.
+
+The cycle budget is what the sim will wait for before calling a plan no plan.
+It was a flat forty seconds, which reported a 40 m track crossed at a crawl as
+impossible rather than as bad. It now follows the track and the speeds, capped
+at 400 s. Searching uses one cycle at a 0.05 s step, which ranks candidates to
+within a watt of the full run and keeps Best to a few seconds on the slowest
+machine in the space.
+
+The cart is captive: the bogie grips the rail from above, below and both
+sides, so the overturning moment from the sail is a guide-wheel load and not a
+tipping failure. At the default it is about eleven times what the weight alone
+would resist. That load is still not charged for.
+
 Forces and losses
 -----------------
 Carried:
@@ -111,22 +148,10 @@ other specs, which is why Solve exists rather than a hardcoded number.
 Above rated wind
 ----------------
 A 10 m2 sail out-pushes a 1000 N rail at about 12 m/s. That alone costs
-nothing, because out on the power stroke the surplus just accelerates the cart
-until the forces balance. What it threatens is the stop at the far cap, and
-that is the only place the sail sheds load:
-
-  wind   face-on N   max feather   net W
-     8         457         0 deg     250
-    12        1028         0 deg     808
-    16        1828        43 deg    1527
-    20        2857        55 deg    1667
-    25        4464        59 deg    2070
-    30        6428        55 deg    2268
-
-Nothing feathers below about 14 m/s even though the sail passed the rail force
-at 12, because the cart is moving by the time it matters and the apparent wind
-has dropped. Power keeps climbing while Cp collapses, which is what a
-force-limited machine should do.
+nothing on the power stroke, because the surplus just accelerates the cart
+until the forces balance. At the far cap the surplus is a harder stop, and
+those watt-seconds are charged. The sail is not turned to shed it. Turning
+it early made sail width start a second rotation.
 
 On the way home the arrival slew stops at the angle the motor can still creep
 against. Opening past that used to blow the cart back down the track, and the

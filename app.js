@@ -3,19 +3,22 @@ import {
   createState,
   defaultSpecs,
   fitError,
+  holdForce,
+  ranges,
   rig,
   sampleCycle,
   solvePlan,
   step,
-} from "./sim.js?v=158";
-import { draw, bindCam } from "./view.js?v=158";
+} from "./sim.js?v=168";
+import { draw, bindCam } from "./view.js?v=168";
 
-// v3: the reference sail is 2.5×4 m on a 10 m track with a 0.5 s turn.
-// Saved v2 specs would put the old 5×2 m machine back on screen.
-const KEY = "windcart-v3";
+// v4: the tool opens on the 2×5 m sail already set to its best plan.
+// Older saves would put an unsolved controller back on screen.
+const KEY = "windcart-v4";
 const FIELDS = ["wind", "plateW", "plateH", "track", "mass", "outFrac", "vReturn", "turn", "fMax", "cd", "eta", "crr"];
 
 let specs = loadSpecs();
+let lastBest = loadBest(specs);
 let state = createState(specs);
 let running = false;
 let last = 0;
@@ -36,9 +39,30 @@ function loadSpecs() {
   const base = defaultSpecs();
   try {
     const saved = JSON.parse(localStorage.getItem(KEY + "-specs") || "null");
-    if (saved && typeof saved === "object") return { ...base, ...saved, turnLead: 0.6 };
+    if (saved && typeof saved === "object") return { ...base, ...saved };
   } catch (e) {}
   return base;
+}
+
+function loadBest(s) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(KEY + "-best") || "null");
+    if (saved && typeof saved === "object") return { ...s, ...saved };
+  } catch (e) {}
+  return { ...s };
+}
+
+function markBest(s) {
+  lastBest = { ...s };
+  try {
+    localStorage.setItem(KEY + "-best", JSON.stringify(lastBest));
+  } catch (e) {}
+}
+
+function fieldOff(id, value) {
+  if (lastBest == null || lastBest[id] == null) return true;
+  const step = Number($(id).step) || 0.01;
+  return Math.abs(Number(value) - Number(lastBest[id])) > step * 0.51;
 }
 
 function pin() {
@@ -84,12 +108,28 @@ function readForm() {
   return next;
 }
 
+/**
+ * Move the drive sliders' ends to suit the sail. A range input clamps its own
+ * value when min or max moves, so the caller re-reads the form afterwards.
+ */
+function applyRanges(s) {
+  const lim = ranges(s);
+  for (const id of Object.keys(lim)) {
+    const el = $(id);
+    el.min = String(lim[id].min);
+    el.max = String(lim[id].max);
+    el.step = String(lim[id].step);
+  }
+}
+
 function fillForm() {
+  applyRanges(specs);
   for (const id of FIELDS) $(id).value = String(specs[id]);
   paintForm();
 }
 
 function paintForm() {
+  applyRanges(readForm());
   const s = readForm();
   $("o-wind").textContent = s.wind.toFixed(1) + " m/s";
   $("o-plateW").textContent = s.plateW.toFixed(1) + " m";
@@ -103,11 +143,21 @@ function paintForm() {
     Math.abs(frac - 1 / 3) < 0.012 ? "1/3 wind" : (frac * s.wind).toFixed(1) + " m/s";
   $("o-vReturn").textContent = s.vReturn.toFixed(1) + " m/s";
   $("o-turn").textContent = s.turn.toFixed(1) + " s";
-  $("o-fMax").textContent = s.fMax.toFixed(0) + " N";
+  // Against the sail it has to hold, so a rail that is only just big enough
+  // reads as one rather than looking like any other number of newtons.
+  $("o-fMax").textContent =
+    s.fMax.toFixed(0) + " N · " + (s.fMax / Math.max(1, holdForce(s))).toFixed(1) + "× hold";
   $("o-cd").textContent = r.cd.toFixed(2);
   $("o-eta").textContent = Math.round(s.eta * 100) + "%";
   $("o-crr").textContent = s.crr.toFixed(3);
   $("warn").textContent = fitError(s);
+  let off = false;
+  for (const id of FIELDS) {
+    const away = fieldOff(id, s[id]);
+    $(id).closest("label")?.classList.toggle("is-off", away);
+    if (away) off = true;
+  }
+  $("solve")?.classList.toggle("is-needed", off);
 }
 
 function ensureCycle() {
@@ -150,19 +200,15 @@ function scheduleSpan() {
   spanTimer = setTimeout(refreshSpan, 60);
 }
 
-// Anything a person reads is watts, with the seconds they cover when the
-// figure is an average. Totals stay in watt-seconds until this divide.
 function fmtW(w) {
   const n = Math.round(w);
   const sign = n > 0 ? "+" : "";
   return sign + n.toLocaleString("en-US") + " W";
 }
 
-function fmtNet(watts, seconds) {
+function fmtNet(watts) {
   if (watts == null) return "net —";
-  const w = Math.round(watts).toLocaleString("en-US") + " W";
-  if (!(seconds > 0)) return "net " + w;
-  return "net " + w + " over " + seconds.toFixed(1) + " s";
+  return "net " + Math.round(watts).toLocaleString("en-US") + " W";
 }
 
 function paint() {
@@ -186,11 +232,11 @@ function paint() {
       $("speed").textContent = postedV.toFixed(1) + " m/s";
     }
     const avg = avgWatts(state);
-    const secs = state.cycles > 0 ? state.avgT / state.cycles : 0;
-    const label = fmtNet(avg, secs);
+    const label = fmtNet(avg);
     if (label !== postedAvg) {
       postedAvg = label;
       $("net").textContent = label;
+      $("substat").textContent = "";
     }
   }
   let frac;
@@ -455,6 +501,7 @@ document.addEventListener(
 $("defaults").addEventListener("click", () => {
   if (running) return;
   specs = defaultSpecs();
+  markBest(specs);
   dropCycle();
   clearScrub();
   state = createState(specs);
@@ -465,22 +512,31 @@ $("defaults").addEventListener("click", () => {
 $("solve").addEventListener("click", async () => {
   if (running) return;
   const btn = $("solve");
-  btn.textContent = "Solving";
+  btn.textContent = "Finding";
   btn.disabled = true;
   await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
   try {
     const base = readForm();
     const plan = solvePlan(base);
-    specs = { ...base, outFrac: plan.outFrac, turn: plan.turn, turnLead: 0.6 };
+    specs = {
+      ...base,
+      outFrac: plan.outFrac,
+      vReturn: plan.vReturn,
+      turn: plan.turn,
+      turnLead: plan.turnLead,
+    };
+    markBest(specs);
     dropCycle();
     clearScrub();
     state = createState(specs);
     fillForm();
     refreshSpan();
     paint();
-    $("warn").textContent = "Best found: " + Math.round(plan.avgW) + " W average";
+    $("warn").textContent = Number.isFinite(plan.avgW)
+      ? "Best · " + Math.round(plan.avgW) + " W"
+      : "No plan for these specs.";
   } finally {
-    btn.textContent = "Solve";
+    btn.textContent = "Best";
     btn.disabled = false;
   }
 });

@@ -12,8 +12,8 @@ export function defaultSpecs() {
     cd: 1.28,
     rho: 1.225,
     thickness: 0.006,
-    turn: 0.5,
-    turnLead: 0.6,
+    turn: 0.3,
+    turnLead: 0.45,
     coilMode: "limited",
     fMax: 1000,
     etaG: 0.95,
@@ -23,7 +23,7 @@ export function defaultSpecs() {
     slewRegen: 0,
     crr: 0.005,
     vReturn: 8,
-    outFrac: 0.24,
+    outFrac: 0.2,
     cuMax: 120,
     eta: 0.95,
   };
@@ -108,6 +108,76 @@ export function rig(s) {
 /** Peak torque a real accelerate-then-decelerate slew would need, N m. */
 export function slewTorque(s) {
   return (rig(s).inertia * 2 * Math.PI) / Math.max(0.15, s.turn) ** 2;
+}
+
+/** Face-on push with the cart at rest: the worst the rail ever has to hold. */
+export function holdForce(s) {
+  return Math.abs(aeroForce({ ...s, thickness: s.thickness ?? 0.006 }, 0, 0));
+}
+
+/** Torque the slew drive is built for. A bigger sail gets a bigger drive. */
+const SLEW_NM_PER_M2 = 150;
+
+/**
+ * Quickest 90° the slew drive can actually turn this sail. Inertia goes as
+ * area times width squared and the drive only goes as area, so this comes out
+ * as a flat 0.075 s per metre of width: a 2 m sail can snap round in 0.15 s,
+ * an 8 m sail needs 0.6 s however the drive is sized.
+ */
+export function turnFloor(s) {
+  const r = rig(s);
+  const ceiling = SLEW_NM_PER_M2 * Math.max(0.1, r.area);
+  return Math.sqrt((r.inertia * 2 * Math.PI) / ceiling);
+}
+
+/**
+ * Fastest the cart can be hauled home. Motoring force droops with back-EMF
+ * and is gone at vNoLoad, so a weak rail under a big sail simply cannot reach
+ * the speed the slider used to offer.
+ */
+export function returnCeiling(s) {
+  const vnl = Math.max(1, s.vNoLoad ?? 22);
+  let best = 1;
+  for (let v = 1; v <= 16.0001; v += 0.5) {
+    const drag = Math.abs(aeroForce(s, -v, Math.PI / 2));
+    const roll = (s.crr ?? 0) * (rig(s).total * 9.81 + drag);
+    // Reaching a speed is not the same as holding it. Ask for most of the
+    // force back as margin, or the cruise sits pinned against the limit.
+    if (forceLimit(s, v, true) < 1.8 * (drag + roll)) break;
+    best = v;
+  }
+  return best;
+}
+
+/** 1, 2 or 5 times a power of ten, so a slider lands on readable numbers. */
+function niceStep(span) {
+  const pow = 10 ** Math.floor(Math.log10(Math.max(1e-6, span)));
+  const n = span / pow;
+  return (n >= 5 ? 5 : n >= 2 ? 2 : 1) * pow;
+}
+
+/**
+ * Slider ends that follow the machine. Fixed ends let you ask for a rail too
+ * weak to hold its own sail, a slew faster than any drive could turn it, or a
+ * return speed the coils cannot reach. The sail and the wind are free; the
+ * drive is sized to them.
+ */
+export function ranges(s) {
+  // Two jobs, and the rail has to do both: hold the sail standing still, or
+  // the stop is the end bumper rather than the coils; and shift the cart at
+  // a metre per second squared, or a tiny sail in light air gets a rail of a
+  // couple of newtons that cannot work the machine at all.
+  const need = Math.max(holdForce(s), rig(s).total * 1);
+  const fStep = niceStep(Math.max(100, need * 3) / 120);
+  const fMin = Math.max(fStep, Math.ceil(need / fStep) * fStep);
+  const fMax = Math.max(fMin + fStep, Math.ceil((need * 3) / fStep) * fStep);
+  const held = { ...s, fMax: clamp(s.fMax ?? fMin, fMin, fMax) };
+  const tMin = Math.max(0.1, Math.ceil(turnFloor(s) * 10) / 10);
+  return {
+    fMax: { min: fMin, max: fMax, step: fStep },
+    turn: { min: tMin, max: Math.max(tMin + 0.1, 3), step: 0.1 },
+    vReturn: { min: 1, max: returnCeiling(held), step: 0.5 },
+  };
 }
 
 /**
@@ -354,29 +424,27 @@ function sub(st, dt) {
     st.alpha = Math.max(0, st.alpha - turnRate * dt);
   }
 
-  // Shed load rather than stall. The sail can never come further into the wind
-  // than the rail can hold against, so in a gale it simply runs part-feathered.
-  // Feathering is a stopping aid, not a cruise setting. Out on the power
-  // stroke a sail that out-pushes the coils simply drives the cart faster
-  // until the forces balance, and shedding that load would be throwing away
-  // the stroke. Stopping at the far cap is where authority actually matters.
-  const mustHold = phase === "brakeOut" || phase === "turnEdge";
-  const floor = mustHold ? featherFloor(s, st.vx) : 0;
-  const bound = st.alpha < floor;
-  st.feather = bound ? floor : 0;
-  if (bound) st.alpha = Math.min(Math.PI / 2, floor);
+  // The rail can still be overpowered. Record it, but do not turn the sail
+  // to shed it. Doing that made width start a second rotation: a wide plate
+  // flipped to edge on the way out, then flipped back to face at home.
+  // The Turn slider is the only thing that turns the sail.
+  const shedding = phase === "brakeOut" || phase === "turnEdge";
+  st.feather = shedding ? featherFloor(s, st.vx) : 0;
 
-  // Work the slew drive does: spin the sail up to rate, then recover on the
-  // way down, plus the aero torque it turns against while the plate is loaded.
+  // Work the slew drive does. A real slew accelerates through the first
+  // half of the 90° and brakes through the second. The spin energy is
+  // spent across that first half, not dumped into one step; spin-down
+  // goes into the brake unless slewRegen buys it back onto the bus.
   const dAlpha = Math.abs(st.alpha - alpha0);
   const slewing = dAlpha > 1e-9;
   const spinKE = 0.5 * rg.inertia * turnRate * turnRate;
   let slewE = 0;
-  // A geared slew drive is not back-drivable, so by default the spin-down goes
-  // into the brake rather than back onto the bus. slewRegen buys that back.
-  if (slewing && !st.slewing) slewE += spinKE / s.etaM;
-  else if (!slewing && st.slewing) slewE -= spinKE * s.etaG * (s.slewRegen ?? 0);
   if (slewing) {
+    const half = Math.PI / 4;
+    const accel = st.alpha > alpha0 ? st.alpha < half : st.alpha > half;
+    const share = dAlpha / half;
+    if (accel) slewE += (spinKE / s.etaM) * share;
+    else slewE -= spinKE * s.etaG * (s.slewRegen ?? 0) * share;
     const vRel = st.vx - s.wind;
     const q = 0.5 * s.rho * vRel * vRel;
     const lever = SLEW_CP * s.plateW;
@@ -566,12 +634,15 @@ function sustainedPeak(values) {
  * of room so the hardest stop in the cycle does not pin the meter.
  */
 export function sampleCycle(specs, maxFrames = 5000) {
-  const dt = 0.02;
+  // Coarsen the step rather than stop early, so a long cycle is scrubbed end
+  // to end instead of being cut off part way round.
+  const dt = Math.max(0.02, Math.ceil((cycleBudget(specs) / maxFrames) * 500) / 500);
   const st = createState(specs);
   // A small sail on a long track in light air takes well over a minute to come
   // round. A short window reports that working plan as no plan at all.
   let g = 0;
-  while (st.cycles < 1 && g++ < 8000) step(st, dt);
+  const cap = cycleBudget(specs) / dt;
+  while (st.cycles < 1 && g++ < cap) step(st, dt);
   if (st.cycles < 1) return null;
   const mark = st.cycles;
   const frames = [];
@@ -597,22 +668,34 @@ export function sampleCycle(specs, maxFrames = 5000) {
   return { frames, seconds: frames.length * dt, span: peak + 1000 };
 }
 
+/**
+ * Generous seconds for one cycle at these specs: out, back, four slews and
+ * some slack. A flat forty-second cap called a slow machine no plan at all —
+ * a long track crossed at a crawl is a bad design, not an impossible one, and
+ * the tool should say so in watts rather than refusing to run it.
+ */
+function cycleBudget(s) {
+  const out = s.track / Math.max(0.2, s.wind * s.outFrac);
+  const home = s.track / Math.max(0.2, Math.abs(s.vReturn));
+  const est = out + home + 4 * Math.max(0.15, s.turn) + 6;
+  // Bounded, or Best spends seconds chasing a machine nobody would build.
+  // The slowest real cycle in the slider space is a 40 m track crawled at
+  // 0.2 m/s, which is inside 400 s with room to spare.
+  return Math.min(400, Math.max(60, 2.5 * est));
+}
+
 /** Average net watts over steady cycles. Returns null if it never settles. */
-export function score(specs, cycles = 2) {
+export function score(specs, cycles = 2, dt = 0.02) {
   const st = createState(specs);
-  const dt = 0.02;
-  // Caps are in simulated seconds: a plan that cannot turn a cycle inside
-  // forty seconds is not a plan, and waiting on it is what made this slow.
+  const cap = cycleBudget(specs) / dt;
   let guard = 0;
-  while (st.cycles < 1 && guard++ < 2000) step(st, dt);
+  while (st.cycles < 1 && guard++ < cap) step(st, dt);
   if (st.cycles < 1) return null;
   const t0 = st.time;
   const a = st.gen, b = st.mot, c = st.slew, d = st.loss, e = st.stop;
   const target = st.cycles + cycles;
   guard = 0;
-  // Budget per cycle, not a flat count: in a light wind a cycle takes over
-  // twenty seconds, and a fixed cap just reports a working plan as no plan.
-  while (st.cycles < target && guard++ < 2000 * cycles) step(st, dt);
+  while (st.cycles < target && guard++ < cap * cycles) step(st, dt);
   if (st.cycles < target) return null;
   const T = st.time - t0;
   if (T <= 0) return null;
@@ -620,26 +703,37 @@ export function score(specs, cycles = 2) {
 }
 
 /**
- * Hunt for the outbound speed, slew time and lead that make the most power.
- * Coordinate descent: the three interact, but weakly enough that two passes
- * land on the same answer as a full grid at a fraction of the cost.
+ * Hunt for the outbound speed, return speed, slew time and lead that make
+ * the most power. Coordinate descent: they interact, but weakly enough that
+ * two passes land on the same answer as a full grid at a fraction of the cost.
  */
 export function solvePlan(specs) {
+  const lim = ranges(specs);
   const plan = {
     outFrac: specs.outFrac,
-    turn: specs.turn,
+    vReturn: clamp(specs.vReturn, lim.vReturn.min, lim.vReturn.max),
+    turn: clamp(specs.turn, lim.turn.min, lim.turn.max),
     turnLead: specs.turnLead,
   };
+  // Best may only offer plans the machine can carry out. It used to hand back
+  // a 0.2 s slew for a sail no drive could turn that fast.
+  const inside = (key, values) =>
+    values.filter((v) => v >= lim[key].min && v <= lim[key].max).concat(plan[key]);
   const axes = [
-    ["outFrac", [0.12, 0.16, 0.2, 0.24, 0.28, 0.32, 0.36, 0.42, 0.5]],
-    ["turn", [0.2, 0.3, 0.4, 0.5, 0.7, 1, 1.4, 2]],
+    ["outFrac", [0.16, 0.2, 0.24, 0.28, 0.32, 0.36, 0.42, 0.5]],
+    ["vReturn", inside("vReturn", [4, 6, 8, 10, 12, 14, 16])],
+    ["turn", inside("turn", [0.2, 0.3, 0.4, 0.5, 0.7, 1, 1.4, 2])],
     ["turnLead", [0, 0.15, 0.3, 0.45, 0.6, 0.8, 1]],
   ];
-  let best = score({ ...specs, ...plan }) ?? -Infinity;
+  // The cycle is periodic from the first stroke, so one cycle at a coarser
+  // step ranks candidates to within a watt. Searching at full resolution
+  // took most of ten seconds on a slow machine.
+  const rank = (p) => score({ ...specs, ...p }, 1, 0.05);
+  let best = rank(plan) ?? -Infinity;
   for (let pass = 0; pass < 2; pass++) {
     for (const [key, values] of axes) {
       for (const v of values) {
-        const w = score({ ...specs, ...plan, [key]: v });
+        const w = rank({ ...plan, [key]: v });
         if (w != null && w > best) {
           best = w;
           plan[key] = v;
@@ -647,7 +741,7 @@ export function solvePlan(specs) {
       }
     }
   }
-  return { ...plan, avgW: best };
+  return { ...plan, avgW: score({ ...specs, ...plan }) ?? best };
 }
 
 export function phaseLabel(phase) {

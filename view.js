@@ -1,6 +1,6 @@
 /** Side view of the machine. Face-on sail is the thin plate. Edge-on sail faces the camera. */
 
-import { stroke } from "./sim.js?v=158";
+import { stroke } from "./sim.js?v=168";
 
 function sub(a, b) {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -980,7 +980,10 @@ export function draw(canvas, st) {
   // Strips keep a near corner from sorting over the whole track. They
   // overlap so the join antialiases onto the same grey, instead of a dark
   // crack that opens and closes as the camera moves. No separate edge rail:
-  // that rail was charcoal, and only parts of it won the sort.
+  // that rail was charcoal, and only parts of it won the sort. The white
+  // border and grid are stroked in screen space after the fills, so they
+  // stay a hairline instead of fighting the depth sort.
+  let sailMark = null;
   {
     const hx = 0.012;
     const hy = s.plateH / 2;
@@ -1006,6 +1009,9 @@ export function draw(canvas, st) {
         : [corner(xSkin, -hy, z0), corner(xSkin, hy, z0), corner(xSkin, hy, z1), corner(xSkin, -hy, z1)];
       add(skin, shade(PLATE, tone));
     }
+    // A hair toward the camera so the mark sits on the lit face.
+    const xMark = facingFront ? hx + 0.0015 : -hx - 0.0015;
+    sailMark = { corner, xMark, hy, hz };
   }
 
   // One outline per rail. A tube built from facets has a joint every piece
@@ -1168,6 +1174,54 @@ export function draw(canvas, st) {
     ctx.closePath();
     ctx.fillStyle = hex(poly.color);
     ctx.fill();
+  }
+
+  if (sailMark) {
+    const { corner, xMark, hy, hz } = sailMark;
+    const outline = [
+      corner(xMark, -hy, -hz),
+      corner(xMark, -hy, hz),
+      corner(xMark, hy, hz),
+      corner(xMark, hy, -hz),
+    ].map(project);
+    if (outline.every(Boolean)) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(outline[0].x, outline[0].y);
+      for (let i = 1; i < 4; i++) ctx.lineTo(outline[i].x, outline[i].y);
+      ctx.closePath();
+      ctx.clip();
+      // Finest white hairlines: one CSS pixel, soft so the plate still reads.
+      ctx.strokeStyle = "rgba(255,255,255,0.28)";
+      ctx.lineWidth = 1 / dpr;
+      ctx.lineCap = "butt";
+      const step = 0.25;
+      for (let z = -hz + step; z < hz - 1e-9; z += step) {
+        const a = project(corner(xMark, -hy, z));
+        const b = project(corner(xMark, hy, z));
+        if (!a || !b) continue;
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
+      }
+      for (let y = -hy + step; y < hy - 1e-9; y += step) {
+        const a = project(corner(xMark, y, -hz));
+        const b = project(corner(xMark, y, hz));
+        if (!a || !b) continue;
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = "rgba(255,255,255,0.55)";
+      ctx.beginPath();
+      ctx.moveTo(outline[0].x, outline[0].y);
+      for (let i = 1; i < 4; i++) ctx.lineTo(outline[i].x, outline[i].y);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 
   // Grains that have spilled past the plate and sit closer than it.

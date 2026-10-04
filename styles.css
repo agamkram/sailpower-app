@@ -344,6 +344,17 @@ label.field output {
   font-size: 0.62rem;
 }
 
+label.field.is-off,
+label.field.is-off output {
+  color: var(--amber);
+}
+
+#solve.is-needed {
+  color: #1a1404;
+  background: var(--amber);
+  border-color: rgba(255, 225, 74, 0.7);
+}
+
 .sheet-actions { display: flex; gap: 0.35rem; justify-content: flex-end; margin-top: 0.15rem; }
 
 .warn {

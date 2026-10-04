@@ -86,7 +86,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=IBM+Plex+Mono:wght@500;600&family=Michroma&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=158" />
+  <link rel="stylesheet" href="styles.css?v=168" />
 </head>
 <body>
   <div class="fit-stage" id="fit-stage">
@@ -149,13 +149,13 @@
           <input id="outFrac" type="range" min="0.15" max="0.6" step="0.01" />
         </label>
         <label class="field">Return speed <output id="o-vReturn"></output>
-          <input id="vReturn" type="range" min="1" max="16" step="0.5" />
+          <input id="vReturn" type="range" min="1" max="16" step="0.5" data-adaptive />
         </label>
         <label class="field">Turn <output id="o-turn"></output>
-          <input id="turn" type="range" min="0.3" max="3" step="0.1" />
+          <input id="turn" type="range" min="0.2" max="3" step="0.1" data-adaptive />
         </label>
         <label class="field">Rail force <output id="o-fMax"></output>
-          <input id="fMax" type="range" min="200" max="3000" step="50" />
+          <input id="fMax" type="range" min="720" max="2150" step="10" data-adaptive />
         </label>
         <label class="field">Drag <output id="o-cd"></output>
           <input id="cd" type="range" min="0.6" max="2" step="0.02" />
@@ -167,13 +167,13 @@
           <input id="crr" type="range" min="0.001" max="0.04" step="0.001" />
         </label>
         <div class="sheet-actions">
-          <button type="button" id="solve">Solve</button>
+          <button type="button" id="solve">Best</button>
           <button type="button" id="defaults">Defaults</button>
           <button type="button" class="primary" id="close-specs">Done</button>
         </div>
       </form>
     </div>
   </div>
-  <script type="module" src="app.js?v=158"></script>
+  <script type="module" src="app.js?v=168"></script>
 </body>
 </html>
