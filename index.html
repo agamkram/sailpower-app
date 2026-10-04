@@ -6,20 +6,21 @@
   <meta name="theme-color" content="#0a0e14" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="WindCart" />
+  <meta name="apple-mobile-web-app-title" content="SailPower" />
   <meta name="description" content="A sail on a rail. Face the wind on the way out, edge-on on the way back. Watts over each run, side by side." />
+  <!-- social-share meta (tier-a) -->
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="Mark Maga" />
-  <meta property="og:title" content="WindCart — a sail on a rail" />
+  <meta property="og:title" content="SailPower — a sail on a rail" />
   <meta property="og:description" content="Face the wind on the way out, edge-on on the way back. Watts over each run, side by side." />
-  <meta property="og:url" content="https://windcart.markmaga.com/" />
-  <link rel="canonical" href="https://windcart.markmaga.com/" />
-  <meta property="og:image" content="https://windcart.markmaga.com/icon-512.png" />
+  <meta property="og:url" content="https://sailpower.markmaga.com/" />
+  <link rel="canonical" href="https://sailpower.markmaga.com/" />
+  <meta property="og:image" content="https://sailpower.markmaga.com/icon-512.png" />
   <meta name="twitter:card" content="summary" />
-  <meta name="twitter:title" content="WindCart — a sail on a rail" />
+  <meta name="twitter:title" content="SailPower — a sail on a rail" />
   <meta name="twitter:description" content="Face the wind on the way out, edge-on on the way back. Watts over each run, side by side." />
-  <meta name="twitter:image" content="https://windcart.markmaga.com/icon-512.png" />
-  <title>WindCart — a sail on a rail | Mark Maga</title>
+  <meta name="twitter:image" content="https://sailpower.markmaga.com/icon-512.png" />
+  <title>SailPower — a sail on a rail | Mark Maga</title>
   <!--
     Desktop iOS-full-bleed.txt — Bug B (PWA short layout viewport).
     PWA: fillH = max(innerHeight, screen long edge) BEFORE first paint.
@@ -79,20 +80,21 @@
     })();
   </script>
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="icon" href="favicon.ico" sizes="32x32" />
+  <link rel="icon" href="favicon.ico" sizes="any" />
   <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png" />
-  <link rel="icon" type="image/png" href="icon-192.png" />
+  <link rel="icon" type="image/png" sizes="64x64" href="favicon-64.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
   <link rel="apple-touch-icon" href="apple-touch-icon.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=IBM+Plex+Mono:wght@500;600&family=Michroma&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=168" />
+  <link rel="stylesheet" href="styles.css?v=174" />
 </head>
 <body>
   <div class="fit-stage" id="fit-stage">
     <div class="app" id="app">
       <header>
-        <h1>WindCart</h1>
+        <h1>SailPower</h1>
       </header>
 
       <div class="stage-wrap">
@@ -174,6 +176,10 @@
       </form>
     </div>
   </div>
-  <script type="module" src="app.js?v=168"></script>
+  <script type="module" src="app.js?v=174"></script>
+  <script>
+    window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
+  </script>
+  <script defer src="/_vercel/insights/script.js"></script>
 </body>
 </html>

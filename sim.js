@@ -1,4 +1,4 @@
-/** WindCart cycle. +x is downwind. Plate yaw 0 faces the wind, π/2 is edge-on. */
+/** SailPower cycle. +x is downwind. Plate yaw 0 faces the wind, π/2 is edge-on. */
 
 export function defaultSpecs() {
   return {
@@ -260,6 +260,11 @@ export function createState(specs) {
     cycleStop: 0,
     avgNet: 0,
     avgT: 0,
+    lastGen: 0,
+    lastMot: 0,
+    lastSlew: 0,
+    lastLoss: 0,
+    lastStop: 0,
   };
 }
 
@@ -279,6 +284,34 @@ export function netOf(st) {
  */
 export function avgWatts(st) {
   return st.avgT > 0 ? st.avgNet / st.avgT : null;
+}
+
+/**
+ * This cycle so far, as watts. Energy banked since the cap divided by the
+ * time since the cap, so the column moves while the cart is moving and
+ * starts over when the cycle does. A cycle that has not begun yet falls
+ * back to the one that just finished.
+ */
+export function cycleWatts(st) {
+  // The closing step starts the next cycle with a few milliseconds on the
+  // clock. That sliver is not a reading yet; keep showing the cycle that
+  // just finished until this one has something to divide by.
+  const open = st.cycleT > 0.05;
+  const t = open ? st.cycleT : st.lastCycleS;
+  if (!(t > 0)) return null;
+  const made = open ? st.cycleGen : st.lastGen;
+  const motor = open ? st.cycleMot : st.lastMot;
+  const slew = open ? st.cycleSlew : st.lastSlew;
+  const loss = open ? st.cycleLoss : st.lastLoss;
+  const stop = open ? st.cycleStop : st.lastStop;
+  return {
+    made: made / t,
+    motor: motor / t,
+    slew: slew / t,
+    loss: loss / t,
+    stop: stop / t,
+    net: (made - motor - slew - loss - stop) / t,
+  };
 }
 
 function clamp(v, a, b) {
@@ -373,7 +406,12 @@ function closeCycle(st) {
   st.cycles += 1;
   st.lastCycleS = st.cycleT;
   st.cycleT = 0;
-  st.lastCycleNet = st.cycleGen - st.cycleMot - st.cycleSlew - st.cycleLoss - st.cycleStop;
+  st.lastGen = st.cycleGen;
+  st.lastMot = st.cycleMot;
+  st.lastSlew = st.cycleSlew;
+  st.lastLoss = st.cycleLoss;
+  st.lastStop = st.cycleStop;
+  st.lastCycleNet = st.lastGen - st.lastMot - st.lastSlew - st.lastLoss - st.lastStop;
   st.avgNet += st.lastCycleNet;
   st.avgT += st.lastCycleS;
   st.cycleGen = 0;
@@ -531,6 +569,26 @@ function sub(st, dt) {
     else if (phase === "back") st.slip = st.vx > 0.5;
   }
 
+  // Bank this step before the cycle is allowed to close, so the closing step
+  // belongs to the cycle it finished and the next one starts from zero.
+  const mech = -fCmd * st.vx;
+  if (mech >= 0) {
+    const e = mech * s.etaG * dt;
+    st.gen += e;
+    st.cycleGen += e;
+  } else {
+    const e = (-mech / s.etaM) * dt;
+    st.mot += e;
+    st.cycleMot += e;
+  }
+  const cu = s.cuMax * (fCmd / s.fMax) ** 2;
+  const iron = (s.ironRef ?? 35) * (st.vx / 10) ** 2;
+  const eLoss = (cu + iron) * dt;
+  st.loss += eLoss;
+  st.cycleLoss += eLoss;
+  st.time += dt;
+  st.cycleT += dt;
+
   const parked = Math.abs(st.vx) < 0.15;
   if ((phase === "brakeOut" || phase === "turnEdge") && parked && st.x > hi - 0.08) {
     st.vx = 0;
@@ -553,29 +611,9 @@ function sub(st, dt) {
   // cycle turns over on sail angle rather than on sitting still at the cap.
   if (phase === "turnFace" && st.alpha <= 0.05) phase = closeCycle(st);
 
-  const mech = -fCmd * st.vx;
-  if (mech >= 0) {
-    const e = mech * s.etaG * dt;
-    st.gen += e;
-    st.cycleGen += e;
-  } else {
-    const e = (-mech / s.etaM) * dt;
-    st.mot += e;
-    st.cycleMot += e;
-  }
-  // Copper scales with force squared and iron with speed squared, and both are
-  // paid at every speed. The old model only charged copper while parked.
-  const cu = s.cuMax * (fCmd / s.fMax) ** 2;
-  const iron = (s.ironRef ?? 35) * (st.vx / 10) ** 2;
-  const eLoss = (cu + iron) * dt;
-  st.loss += eLoss;
-  st.cycleLoss += eLoss;
-
   st.phase = phase;
   st.force = fCmd;
   st.faero = faNow;
-  st.time += dt;
-  st.cycleT += dt;
 }
 
 export function step(st, dt) {
@@ -660,12 +698,33 @@ export function sampleCycle(specs, maxFrames = 5000) {
       slip: st.slip,
     };
     frames.push(f);
+    const banked = { gen: st.gen, mot: st.mot, slew: st.slew, loss: st.loss, stop: st.stop };
     step(st, dt);
     f.inst = st.inst;
+    f.ledger = cycleWatts(st);
+    f.rate = {
+      made: (st.gen - banked.gen) / dt,
+      motor: (st.mot - banked.mot) / dt,
+      slew: (st.slew - banked.slew) / dt,
+      loss: (st.loss - banked.loss) / dt,
+      stop: (st.stop - banked.stop) / dt,
+      net: st.inst,
+    };
   }
   if (frames.length < 2) return null;
   const peak = sustainedPeak(frames.map((f) => f.inst));
-  return { frames, seconds: frames.length * dt, span: peak + 1000 };
+  const T = st.lastCycleS;
+  const totals = T > 0
+    ? {
+        made: st.lastGen / T,
+        motor: st.lastMot / T,
+        slew: st.lastSlew / T,
+        loss: st.lastLoss / T,
+        stop: st.lastStop / T,
+        net: st.lastCycleNet / T,
+      }
+    : null;
+  return { frames, seconds: frames.length * dt, span: peak + 1000, totals };
 }
 
 /**

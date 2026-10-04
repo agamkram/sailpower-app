@@ -1,6 +1,7 @@
 import {
   avgWatts,
   createState,
+  cycleWatts,
   defaultSpecs,
   fitError,
   holdForce,
@@ -9,12 +10,12 @@ import {
   sampleCycle,
   solvePlan,
   step,
-} from "./sim.js?v=168";
-import { draw, bindCam } from "./view.js?v=168";
+} from "./sim.js?v=174";
+import { draw, bindCam } from "./view.js?v=174";
 
 // v4: the tool opens on the 2×5 m sail already set to its best plan.
 // Older saves would put an unsolved controller back on screen.
-const KEY = "windcart-v4";
+const KEY = "sailpower-v1";
 const FIELDS = ["wind", "plateW", "plateH", "track", "mass", "outFrac", "vReturn", "turn", "fMax", "cd", "eta", "crr"];
 
 let specs = loadSpecs();
@@ -300,6 +301,81 @@ function paintGauge() {
   const speed = state.vx >= 0 ? state.vx / outScale : state.vx / backScale;
   const r = Math.max(8, h / 2 - 3);
   drawRoundDial(ctx, r + 2, h / 2, r, gen, use, speed);
+  drawTotals(ctx, r * 2 + 16, h, w - r * 2 - 20, cycleTotals());
+}
+
+// Smoothed power of each ledger line. The cycle average left motor and slew
+// at 0 for the whole outbound, then showed them as a few dozen watts, so
+// they looked unwired. This is the power of that line right now.
+let termMark = null;
+let termSmooth = null;
+
+function liveTerms() {
+  const now = {
+    t: state.time,
+    made: state.gen,
+    motor: state.mot,
+    slew: state.slew,
+    loss: state.loss,
+    stop: state.stop,
+  };
+  if (!termMark || now.t < termMark.t - 1e-6) {
+    termMark = now;
+    termSmooth = null;
+    return null;
+  }
+  const dt = now.t - termMark.t;
+  if (dt < 1e-4) return termSmooth;
+  const raw = {
+    made: (now.made - termMark.made) / dt,
+    motor: (now.motor - termMark.motor) / dt,
+    slew: (now.slew - termMark.slew) / dt,
+    loss: (now.loss - termMark.loss) / dt,
+    stop: (now.stop - termMark.stop) / dt,
+  };
+  termMark = now;
+  const a = 1 - Math.exp(-dt / 0.12);
+  if (!termSmooth) termSmooth = { made: 0, motor: 0, slew: 0, loss: 0, stop: 0, net: 0 };
+  for (const k of Object.keys(raw)) termSmooth[k] += (raw[k] - termSmooth[k]) * a;
+  termSmooth.net = termSmooth.made - termSmooth.motor - termSmooth.slew - termSmooth.loss - termSmooth.stop;
+  return termSmooth;
+}
+
+/** Each line is that term's watts right now. They add up to the needle. */
+function cycleTotals() {
+  if (scrub != null && cycle && cycle.frames.length) {
+    const i = Math.round(scrub * (cycle.frames.length - 1));
+    const f = cycle.frames[i];
+    return f.rate || f.ledger || cycle.totals;
+  }
+  if (running || state.time > 0.05) return liveTerms() || cycleWatts(state) || (cycle && cycle.totals);
+  return (cycle && cycle.totals) || cycleWatts(state);
+}
+
+function drawTotals(ctx, x, h, width, totals) {
+  if (!totals || width < 72) return;
+  const rows = [
+    ["made", totals.made, "#34d399"],
+    ["motor", -totals.motor, "#ffe14a"],
+    ["slew", -totals.slew, "#ffe14a"],
+    ["loss", -totals.loss, "#9aa3b2"],
+    ["stops", -totals.stop, "#9aa3b2"],
+    ["net", totals.net, totals.net >= 0 ? "#34d399" : "#ffe14a"],
+  ];
+  const line = Math.min(13, h / rows.length);
+  let y = (h - line * rows.length) / 2 + line / 2;
+  ctx.font = "600 10px IBM Plex Mono, ui-monospace, monospace";
+  ctx.textBaseline = "middle";
+  for (const [name, watts, color] of rows) {
+    ctx.textAlign = "left";
+    ctx.fillStyle = "rgba(232,237,244,0.55)";
+    ctx.fillText(name, x, y);
+    ctx.textAlign = "right";
+    ctx.fillStyle = color;
+    const n = Math.round(watts);
+    ctx.fillText((n > 0 ? "+" : "") + n.toLocaleString("en-US"), x + width, y);
+    y += line;
+  }
 }
 
 /** Top half. -1 is left, 0 is up, 1 is right. */

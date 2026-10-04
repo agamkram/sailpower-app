@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Serve WindCart over HTTPS on all interfaces for Mac + phone LAN preview."""
+"""Serve SailPower over HTTPS on all interfaces for Mac + phone LAN preview."""
 # --- preview-ctl guard v3: begin ---
 # Managed by ~/bin/preview-ctl.py. Three hazards this removes:
 #   1. The launching terminal can go away while the server runs on. Writing an
@@ -329,7 +329,7 @@ def main():
     ctx.load_cert_chain(certfile=str(CERT), keyfile=str(KEY))
     httpsd.socket = ctx.wrap_socket(httpsd.socket, server_side=True)
 
-    print("WindCart", flush=True)
+    print("SailPower", flush=True)
     print("  Mac:    https://127.0.0.1:%s/" % port, flush=True)
     if lan_hint:
         print("  LAN:    https://%s:%s/" % (lan_hint, port), flush=True)

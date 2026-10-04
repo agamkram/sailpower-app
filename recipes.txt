@@ -1,4 +1,4 @@
-WindCart model notes
+SailPower model notes
 Wind 10 m/s, sail 5x2 m, 24 kg chassis plus a 16 kg sail, rail 1000 N,
 track 20 m. Figures are three steady cycles after the first, averaged over the
 whole cycle including time at rest.

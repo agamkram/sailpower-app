@@ -1,26 +1,44 @@
 {
-  "name": "WindCart",
-  "short_name": "WindCart",
-  "description": "A plate on a rail. Face-on downwind, edge-on back. Watts over each run.",
+  "name": "SailPower",
+  "short_name": "SailPower",
+  "description": "A sail on a rail. Face the wind on the way out, edge-on on the way back. Watts over each run, side by side.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0a0e14",
   "theme_color": "#0a0e14",
   "icons": [
     {
-      "src": "/icon-192.png",
+      "src": "favicon-32.png",
+      "sizes": "32x32",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "favicon-64.png",
+      "sizes": "64x64",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icon-512.png",
+      "src": "icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/apple-touch-icon.png",
+      "src": "icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "apple-touch-icon.png",
       "sizes": "180x180",
       "type": "image/png",
       "purpose": "any"
