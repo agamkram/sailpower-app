@@ -1,7 +1,7 @@
 {
   "name": "WindCart",
   "short_name": "WindCart",
-  "description": "A plate on a rail. Face-on downwind, edge-on back. Energy recorded per run.",
+  "description": "A plate on a rail. Face-on downwind, edge-on back. Watts over each run.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0a0e14",

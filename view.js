@@ -1,6 +1,6 @@
 /** Side view of the machine. Face-on sail is the thin plate. Edge-on sail faces the camera. */
 
-import { stroke } from "./sim.js?v=145";
+import { stroke } from "./sim.js?v=150";
 
 function sub(a, b) {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -287,11 +287,11 @@ function holdOffPlate(p, sail) {
 }
 
 
-// Side-on. An along-track offset made the rails run uphill; yaw orbits
+// Three-quarter from upstream so the face-on face reads; yaw orbits
 // around the vertical from here, and the machine stays on the ground.
 const CAM0 = {
-  yaw: 0,
-  pitch: Math.asin(2.55 / Math.hypot(2.55, 7.78)),
+  yaw: -Math.PI / 4,
+  pitch: 0.06,
   dist: Math.hypot(2.55, 7.78),
 };
 const FOV = 0.98;
@@ -322,30 +322,114 @@ function horizonY(cam) {
   return cam.h / 2 - (camUp / camFwd) * cam.fLen;
 }
 
-/** Flat ground on y = 0, sky above the horizon. Neither knows about the screen. */
+/** Fixed directions on a celestial sphere — painted at infinity so only orientation moves them. */
+const STARS = (() => {
+  const out = [];
+  let seed = 0xc0ffee;
+  const rnd = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) | 0;
+    return (seed >>> 0) / 4294967296;
+  };
+  for (let i = 0; i < 1100; i++) {
+    // Mostly above the ground, with a thin band below so a pitched camera still fills.
+    const y = rnd() * 1.12 - 0.12;
+    const rxy = Math.sqrt(Math.max(0, 1 - y * y));
+    const a = rnd() * Math.PI * 2;
+    out.push({
+      d: [rxy * Math.cos(a), y, rxy * Math.sin(a)],
+      bright: rnd(),
+    });
+  }
+  return out;
+})();
+
+/** Flat ground on y = 0, night sky above the horizon. Neither knows about the screen. */
 function paintWorld(ctx, cam) {
   const y = horizonY(cam);
   const { w, h } = cam;
+
+  const paintSky = (top, bot) => {
+    const g = ctx.createLinearGradient(0, top, 0, bot);
+    g.addColorStop(0, "#010208");
+    g.addColorStop(0.55, "#07101f");
+    g.addColorStop(1, "#121c33");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, top, w, bot - top);
+  };
+
+  const paintStars = (bot) => {
+    // Project each star from a sphere locked to the eye so yaw/pitch move the
+    // field with the machine, and cart travel does not drag it sideways.
+    const R = 800;
+    const clip = bot + 2;
+    for (const star of STARS) {
+      const dx = star.d[0] * R;
+      const dy = star.d[1] * R;
+      const dz = star.d[2] * R;
+      const depth = -(dx * cam.zaxis[0] + dy * cam.zaxis[1] + dz * cam.zaxis[2]);
+      if (depth < 1) continue;
+      const sx = w / 2 + ((dx * cam.xaxis[0] + dy * cam.xaxis[1] + dz * cam.xaxis[2]) / depth) * cam.fLen;
+      const sy = h / 2 - ((dx * cam.yaxis[0] + dy * cam.yaxis[1] + dz * cam.yaxis[2]) / depth) * cam.fLen;
+      if (sx < -2 || sx > w + 2 || sy < -2 || sy > clip) continue;
+      const bright = star.bright;
+      const r = bright > 0.97 ? 1.05 : bright > 0.85 ? 0.7 : bright > 0.5 ? 0.45 : 0.3;
+      ctx.fillStyle = `rgba(235,245,255,${0.45 + bright * 0.55})`;
+      ctx.beginPath();
+      ctx.arc(sx, sy, r, 0, Math.PI * 2);
+      ctx.fill();
+      if (bright > 0.985) {
+        ctx.strokeStyle = `rgba(255,255,255,${0.25 + bright * 0.3})`;
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(sx - r * 2.4, sy);
+        ctx.lineTo(sx + r * 2.4, sy);
+        ctx.moveTo(sx, sy - r * 2.4);
+        ctx.lineTo(sx, sy + r * 2.4);
+        ctx.stroke();
+      }
+    }
+  };
+
+  const paintGrass = (top, bot) => {
+    if (bot - top < 1) return;
+    const g = ctx.createLinearGradient(0, top, 0, bot);
+    g.addColorStop(0, "#122816");
+    g.addColorStop(0.45, "#0e1f12");
+    g.addColorStop(1, "#08140c");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, top, w, bot - top);
+    let seed = (Math.floor(w) * 2654435761) ^ (Math.floor(top) * 2246822519) ^ 0x85ebca6b;
+    const rnd = () => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) | 0;
+      return (seed >>> 0) / 4294967296;
+    };
+    const n = Math.max(40, Math.floor((w * (bot - top)) / 3200));
+    for (let i = 0; i < n; i++) {
+      const sx = rnd() * w;
+      const t = rnd();
+      const sy = top + t * (bot - top);
+      const tall = 2 + rnd() * 5 * (0.4 + t);
+      ctx.strokeStyle = rnd() > 0.5 ? "rgba(42,88,48,0.3)" : "rgba(22,55,30,0.35)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(sx + (rnd() - 0.5) * 2.5, sy - tall);
+      ctx.stroke();
+    }
+  };
+
   if (y >= h) {
-    const sky = ctx.createLinearGradient(0, 0, 0, h);
-    sky.addColorStop(0, "#0b1016");
-    sky.addColorStop(1, "#1a2633");
-    ctx.fillStyle = sky;
-    ctx.fillRect(0, 0, w, h);
+    paintSky(0, h);
+    paintStars(h);
     return;
   }
   if (y <= 0) {
-    ctx.fillStyle = "#121920";
-    ctx.fillRect(0, 0, w, h);
+    paintGrass(0, h);
     return;
   }
-  const sky = ctx.createLinearGradient(0, 0, 0, y);
-  sky.addColorStop(0, "#0b1016");
-  sky.addColorStop(1, "#1a2633");
-  ctx.fillStyle = sky;
-  ctx.fillRect(0, 0, w, y);
-  ctx.fillStyle = "#121920";
-  ctx.fillRect(0, y, w, h - y);
+  paintSky(0, y);
+  paintStars(y);
+  paintGrass(y, h);
 }
 
 /** Look-at with world up. Dragging orbits the camera; the machine stays planted. */

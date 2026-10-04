@@ -7,8 +7,8 @@ import {
   sampleCycle,
   solvePlan,
   step,
-} from "./sim.js?v=145";
-import { draw, bindCam } from "./view.js?v=145";
+} from "./sim.js?v=150";
+import { draw, bindCam } from "./view.js?v=150";
 
 // v3: the reference sail is 2.5×4 m on a 10 m track with a 0.5 s turn.
 // Saved v2 specs would put the old 5×2 m machine back on screen.
@@ -150,10 +150,19 @@ function scheduleSpan() {
   spanTimer = setTimeout(refreshSpan, 60);
 }
 
+// Anything a person reads is watts, with the seconds they cover when the
+// figure is an average. Totals stay in watt-seconds until this divide.
 function fmtW(w) {
   const n = Math.round(w);
   const sign = n > 0 ? "+" : "";
   return sign + n.toLocaleString("en-US") + " W";
+}
+
+function fmtNet(watts, seconds) {
+  if (watts == null) return "net —";
+  const w = Math.round(watts).toLocaleString("en-US") + " W";
+  if (!(seconds > 0)) return "net " + w;
+  return "net " + w + " over " + seconds.toFixed(1) + " s";
 }
 
 function paint() {
@@ -177,10 +186,11 @@ function paint() {
       $("speed").textContent = postedV.toFixed(1) + " m/s";
     }
     const avg = avgWatts(state);
-    const avgN = avg == null ? null : Math.round(avg);
-    if (avgN !== postedAvg) {
-      postedAvg = avgN;
-      $("net").textContent = avgN == null ? "net —" : "net " + avgN + " W";
+    const secs = state.cycles > 0 ? state.avgT / state.cycles : 0;
+    const label = fmtNet(avg, secs);
+    if (label !== postedAvg) {
+      postedAvg = label;
+      $("net").textContent = label;
     }
   }
   let frac;

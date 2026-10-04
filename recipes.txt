@@ -54,7 +54,7 @@ Carried:
               spec is a trim around that, not the value
   yaw inertia m*w^2/12 about the vertical pivot, width squared
   added air   rho*(pi/4)*c^2*b with a slenderness factor, acting as cos^2 of
-              yaw. Conservative, so it moves timing and peak force, not energy
+              yaw. Conservative, so it moves timing and peak force, not the watt-seconds
   slew work   spin-up through the motor, aero torque against the loaded plate,
               and no recovery on spin-down because a geared slew drive is not
               back-drivable. slewRegen buys that back if the drive is direct
@@ -64,7 +64,7 @@ Carried:
   iron        ironRef*(v/10)^2
   rolling     crr against weight plus the sail thrust reacted through the
               guide rollers, which at 10 m/s is about twice the weight
-  end stops   kinetic energy absorbed by a stop is charged, not deleted
+  end stops   watt-seconds absorbed by a stop are charged, not deleted
   feathering  a stopping aid, not a cruise setting. Out on the power stroke a
               sail that out-pushes the coils just drives the cart faster until
               the forces balance, so the sail only sheds load while braking
@@ -146,7 +146,7 @@ Across 1944 combinations of wind 4-30 m/s, sail 0.5-32 m2, track 8-40 m, rail
 that can hold the sail at rest always arrives under control. Where the sail
 out-pushes the rail at rest, feathering still saves most stops, because the
 cart is already moving and the apparent wind has dropped. 281 of them are not
-controlled arrivals: the end stop absorbs the hit and that energy is charged.
+controlled arrivals: the end stop absorbs the hit and those watt-seconds are charged.
 
 The four corners that used to time out were one machine at each rotation
 preset. A 2 m2 sail in a 14 m/s wind on a 40 m track with a 300 N rail pushes

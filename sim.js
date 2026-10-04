@@ -5,8 +5,8 @@ export function defaultSpecs() {
     wind: 10,
     track: 10,
     gauge: 1,
-    plateW: 2.5,
-    plateH: 4,
+    plateW: 2,
+    plateH: 5,
     mass: 24,
     sailRho: 1.6,
     cd: 1.28,
@@ -91,7 +91,7 @@ const SLEW_CP = 0.1;
  * inertia  yaw inertia about the vertical pivot, m*w^2/12. Scales with width
  *          squared, so this is what separates a 5x2 sail from a 2x5 one.
  * added    air entrained when the plate moves normal to itself. Conservative,
- *          so it shifts timing and peak force rather than net energy.
+ *          so it shifts timing and peak force rather than the watt-seconds.
  */
 export function rig(s) {
   const area = s.plateW * s.plateH;
@@ -166,6 +166,7 @@ export function createState(specs) {
     phase: "out",
     time: 0,
     cycles: 0,
+    // Watt-seconds. Divide by time before anything on screen.
     gen: 0,
     mot: 0,
     slew: 0,
