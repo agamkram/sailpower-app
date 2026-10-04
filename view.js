@@ -1,6 +1,6 @@
 /** Side view of the machine. Face-on sail is the thin plate. Edge-on sail faces the camera. */
 
-import { stroke } from "./sim.js?v=174";
+import { stroke } from "./sim.js?v=188";
 
 function sub(a, b) {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -61,6 +61,7 @@ const windDraw = [];
 let windWall = 0;
 let windSim = null;
 let windClock = 0;
+let windSpread = false;
 
 function windDt(st) {
   const now = performance.now() / 1000;
@@ -99,8 +100,12 @@ function reseedWind(p, band, xLo, xHi, inlet) {
   const box = airSection(band);
   p.z = (Math.random() - 0.5) * 2 * box.zHalf;
   p.y = box.y0 + Math.random() * Math.max(0.4, box.y1 - box.y0);
-  // Upstream edge of the view, so the stream comes in off screen.
-  p.x = inlet ? xLo : xLo + Math.random() * Math.max(0.4, xHi - xLo);
+  // Spread through the whole run. Stacking every recycle on the upstream
+  // face made one sheet, and that sheet came around again each time it
+  // crossed the box. Zoom changes the box, so the sheet sped up and slowed.
+  const span = Math.max(0.4, xHi - xLo);
+  p.x = xLo + Math.random() * span;
+  if (inlet) p.x = Math.min(xHi - 0.2, p.x);
 }
 
 /** Left the sail's cross-section, or the view. */
@@ -146,7 +151,10 @@ function reseedFill(p, box, core, inlet) {
   } else {
     p.z = (Math.random() - 0.5) * 2 * box.zHalf;
   }
-  p.x = inlet ? box.x0 : box.x0 + Math.random() * (box.x1 - box.x0);
+  // Same reason as the sail stream: a shared birth x is a wall, and the
+  // wall's period is the box length over the wind speed, which zoom changes.
+  p.x = box.x0 + Math.random() * Math.max(0.4, box.x1 - box.x0);
+  if (inlet) p.x = Math.min(box.x1 - 0.2, p.x);
 }
 
 function outsideFill(p, box) {
@@ -340,14 +348,27 @@ const CAM0 = {
   dist: Math.hypot(2.55, 7.78),
 };
 const FOV = 0.98;
+const ZOOM_IN = 1.25;
 const camCtl = { yaw: CAM0.yaw, pitch: CAM0.pitch, dist: CAM0.dist };
-// False until the user orbits or pinches. The home view frames the whole run.
+// Slide the look-at point. Yaw and pitch stay put, so the machine keeps its
+// angle to the ground and a drag only moves it around the frame.
+const camPan = [0, 0, 0];
+// False until the user pans or pinches. The home view frames the whole run.
 let camHeld = false;
+// Farthest useful view: the framing that already holds the whole run.
+let homeFit = 24;
+
+function gazePitch() {
+  return Math.max(0, camCtl.pitch);
+}
 
 export function resetCam() {
   camHeld = false;
   camCtl.yaw = CAM0.yaw;
   camCtl.pitch = CAM0.pitch;
+  camPan[0] = 0;
+  camPan[1] = 0;
+  camPan[2] = 0;
 }
 
 /**
@@ -477,7 +498,7 @@ function paintWorld(ctx, cam) {
   paintGrass(y, h);
 }
 
-/** Look-at with world up. Dragging orbits the camera; the machine stays planted. */
+/** Look-at with world up. The horizon stays level; a drag slides the aim. */
 function viewBasis(eye, target, h) {
   const zaxis = norm(sub(eye, target));
   let right = cross([0, 1, 0], zaxis);
@@ -547,14 +568,44 @@ export function bindCam(canvas, onChange) {
   let lastX = 0;
   let lastY = 0;
   let lastPinch = 0;
+  let lastMid = { x: 0, y: 0 };
   let lastTap = 0;
 
   function ptDist(a, b) {
     return Math.hypot(a.x - b.x, a.y - b.y);
   }
+  function centroid() {
+    const pts = [...pointers.values()];
+    return { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+  }
+  // One screen pixel at the aim, in world units, slid along the ground.
+  // The camera height stays put, so the machine cannot leave the ground.
+  function panBy(dx, dy) {
+    const h = Math.max(1, canvas.clientHeight);
+    const cp = Math.cos(gazePitch());
+    const sp = Math.sin(gazePitch());
+    const cy = Math.cos(camCtl.yaw);
+    const sy = Math.sin(camCtl.yaw);
+    const zaxis = [cp * sy, sp, cp * cy];
+    let right = cross([0, 1, 0], zaxis);
+    const rl = Math.hypot(right[0], right[1], right[2]);
+    if (rl < 1e-4) right = [1, 0, 0];
+    else right = [right[0] / rl, right[1] / rl, right[2] / rl];
+    const up = cross(zaxis, right);
+    const fLen = h / 2 / Math.tan(FOV / 2);
+    const scale = camCtl.dist / fLen;
+    camPan[0] += (-right[0] * dx + up[0] * dy) * scale;
+    camPan[2] += (-right[2] * dx + up[2] * dy) * scale;
+    camPan[1] = 0;
+    const horiz = Math.hypot(camPan[0], camPan[2]);
+    if (horiz > 80) {
+      camPan[0] *= 80 / horiz;
+      camPan[2] *= 80 / horiz;
+    }
+  }
   function clampCam() {
-    camCtl.pitch = Math.max(0.08, Math.min(1.35, camCtl.pitch));
-    camCtl.dist = Math.max(3.2, Math.min(72, camCtl.dist));
+    camCtl.pitch = Math.max(-1, Math.min(1.35, camCtl.pitch));
+    camCtl.dist = Math.max(ZOOM_IN, Math.min(homeFit, camCtl.dist));
   }
   function fire() {
     camHeld = true;
@@ -568,7 +619,7 @@ export function bindCam(canvas, onChange) {
       canvas.setPointerCapture(e.pointerId);
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (pointers.size === 1) {
-        mode = "orbit";
+        mode = e.shiftKey ? "pan" : "orbit";
         lastX = e.clientX;
         lastY = e.clientY;
         const now = performance.now();
@@ -580,9 +631,10 @@ export function bindCam(canvas, onChange) {
           lastTap = now;
         }
       } else if (pointers.size === 2) {
-        mode = "pinch";
+        mode = "two";
         const pts = [...pointers.values()];
         lastPinch = ptDist(pts[0], pts[1]);
+        lastMid = centroid();
         lastTap = 0;
       }
       e.preventDefault();
@@ -600,17 +652,29 @@ export function bindCam(canvas, onChange) {
         const dy = e.clientY - lastY;
         lastX = e.clientX;
         lastY = e.clientY;
-        camCtl.yaw -= dx * 0.0055;
-        camCtl.pitch += dy * 0.0042;
+        if (e.shiftKey) {
+          panBy(dx, dy);
+        } else {
+          camCtl.yaw -= dx * 0.0055;
+          camCtl.pitch += dy * 0.0042;
+        }
         fire();
-      } else if (mode === "pinch" && pointers.size >= 2) {
+      } else if (mode === "pan" && pointers.size === 1) {
+        const dx = e.clientX - lastX;
+        const dy = e.clientY - lastY;
+        lastX = e.clientX;
+        lastY = e.clientY;
+        panBy(dx, dy);
+        fire();
+      } else if (mode === "two" && pointers.size >= 2) {
         const pts = [...pointers.values()];
         const d = ptDist(pts[0], pts[1]);
-        if (lastPinch > 1) {
-          camCtl.dist *= lastPinch / d;
-          fire();
-        }
+        const mid = centroid();
+        if (lastPinch > 1) camCtl.dist *= lastPinch / d;
+        panBy(mid.x - lastMid.x, mid.y - lastMid.y);
         lastPinch = d;
+        lastMid = mid;
+        fire();
       }
       e.preventDefault();
     },
@@ -671,16 +735,26 @@ export function draw(canvas, st) {
   const midX = (cap0 + cap1) / 2;
   const homeTarget = [midX, aimY, 0];
   const fitted = homeDist(s, w, h, homeTarget, lo, hi, cap0, cap1, sailTop);
+  homeFit = fitted;
   if (!camHeld) camCtl.dist = fitted;
+  else camCtl.dist = Math.max(ZOOM_IN, Math.min(homeFit, camCtl.dist));
   let follow = 0;
   if (camHeld) {
     const near = fitted * 0.55;
     const far = fitted * 0.85;
     follow = Math.min(1, Math.max(0, (far - camCtl.dist) / Math.max(0.2, far - near)));
   }
-  const target = [midX + (followX + 0.35 - midX) * follow, aimY, 0];
-  const cp = Math.cos(camCtl.pitch);
-  const sp = Math.sin(camCtl.pitch);
+  const railEye = 0.45;
+  const sink = Math.max(0, -camCtl.pitch);
+  const targetY = aimY - sink * Math.max(0, aimY - railEye);
+  const target = [
+    midX + (followX + 0.35 - midX) * follow + camPan[0],
+    targetY + camPan[1],
+    camPan[2],
+  ];
+  const gaze = gazePitch();
+  const cp = Math.cos(gaze);
+  const sp = Math.sin(gaze);
   const cy = Math.cos(camCtl.yaw);
   const sy = Math.sin(camCtl.yaw);
   const eye = [
@@ -720,7 +794,7 @@ export function draw(canvas, st) {
       const d = depthOf(p);
       if (d < zMin) zMin = d;
     }
-    if (zMin < 0.35) return;
+    if (zMin < 0.08) return;
     const proj = [];
     let z = 0;
     for (const p of pts) {
@@ -744,7 +818,9 @@ export function draw(canvas, st) {
     }
     area = Math.abs(area) * 0.5;
     if (area < 0.35) return;
-    if (maxEdge > Math.hypot(w, h) * 1.8) return;
+    // A close sail fills the screen and its edges are long. Only a corner
+    // that has crossed the lens blows an edge out far enough to drop.
+    if (maxEdge > Math.hypot(w, h) * 40) return;
     // Track sits a hair further away so it loses ties against the cart that
     // rides on it, rather than being painted over the top of everything.
     polys.push({ proj, color, z: z / proj.length + layer * 0.02, layer });
@@ -1125,6 +1201,11 @@ export function draw(canvas, st) {
       windFill.push(p);
     }
     if (windFill.length > fillCount) windFill.length = fillCount;
+    if (!windSpread) {
+      windSpread = true;
+      for (const p of windParts) reseedWind(p, band, stream0, stream1, false);
+      for (const p of windFill) reseedFill(p, fillBox, core, false);
+    }
     for (let i = 0; i < fillCount; i++) {
       const p = windFill[i];
       p.x += speed * dt;
@@ -1178,20 +1259,106 @@ export function draw(canvas, st) {
 
   if (sailMark) {
     const { corner, xMark, hy, hz } = sailMark;
-    const outline = [
+    const world = [
       corner(xMark, -hy, -hz),
       corner(xMark, -hy, hz),
       corner(xMark, hy, hz),
       corner(xMark, hy, -hz),
-    ].map(project);
-    if (outline.every(Boolean)) {
-      ctx.save();
+    ];
+    // A corner nearer than this is crossing the lens. Clip there instead of
+    // dropping the whole plate: the old reject left the white grid up and
+    // the gray gone.
+    const near = 0.12;
+    const kept = [];
+    for (let i = 0; i < world.length; i++) {
+      const a = world[i];
+      const b = world[(i + 1) % world.length];
+      const da = depthOf(a);
+      const db = depthOf(b);
+      const aIn = da >= near;
+      const bIn = db >= near;
+      const cut = () => {
+        const t = (da - near) / (da - db || 1e-6);
+        return project([
+          a[0] + (b[0] - a[0]) * t,
+          a[1] + (b[1] - a[1]) * t,
+          a[2] + (b[2] - a[2]) * t,
+        ]);
+      };
+      if (aIn && bIn) {
+        const q = project(b);
+        if (q) kept.push(q);
+      } else if (aIn && !bIn) {
+        const q = cut();
+        if (q) kept.push(q);
+      } else if (!aIn && bIn) {
+        const q = cut();
+        const r = project(b);
+        if (q) kept.push(q);
+        if (r) kept.push(r);
+      }
+    }
+    const margin = 4;
+    const clipEdge = (poly, inside, hit) => {
+      if (poly.length < 2) return [];
+      const out = [];
+      for (let i = 0; i < poly.length; i++) {
+        const a = poly[i];
+        const b = poly[(i + 1) % poly.length];
+        const aIn = inside(a);
+        const bIn = inside(b);
+        if (aIn && bIn) out.push(b);
+        else if (aIn && !bIn) out.push(hit(a, b));
+        else if (!aIn && bIn) {
+          out.push(hit(a, b));
+          out.push(b);
+        }
+      }
+      return out;
+    };
+    let face = kept;
+    const span = (a, b, t, ax, ay) => ({ x: ax, y: ay, z: a.z + (b.z - a.z) * t });
+    face = clipEdge(
+      face,
+      (p) => p.x >= -margin,
+      (a, b) => {
+        const t = (-margin - a.x) / (b.x - a.x || 1e-6);
+        return span(a, b, t, -margin, a.y + (b.y - a.y) * t);
+      }
+    );
+    face = clipEdge(
+      face,
+      (p) => p.x <= w + margin,
+      (a, b) => {
+        const t = (w + margin - a.x) / (b.x - a.x || 1e-6);
+        return span(a, b, t, w + margin, a.y + (b.y - a.y) * t);
+      }
+    );
+    face = clipEdge(
+      face,
+      (p) => p.y >= -margin,
+      (a, b) => {
+        const t = (-margin - a.y) / (b.y - a.y || 1e-6);
+        return span(a, b, t, a.x + (b.x - a.x) * t, -margin);
+      }
+    );
+    face = clipEdge(
+      face,
+      (p) => p.y <= h + margin,
+      (a, b) => {
+        const t = (h + margin - a.y) / (b.y - a.y || 1e-6);
+        return span(a, b, t, a.x + (b.x - a.x) * t, h + margin);
+      }
+    );
+    if (face.length >= 3) {
       ctx.beginPath();
-      ctx.moveTo(outline[0].x, outline[0].y);
-      for (let i = 1; i < 4; i++) ctx.lineTo(outline[i].x, outline[i].y);
+      ctx.moveTo(face[0].x, face[0].y);
+      for (let i = 1; i < face.length; i++) ctx.lineTo(face[i].x, face[i].y);
       ctx.closePath();
+      ctx.fillStyle = hex(PLATE);
+      ctx.fill();
+      ctx.save();
       ctx.clip();
-      // Finest white hairlines: one CSS pixel, soft so the plate still reads.
       ctx.strokeStyle = "rgba(255,255,255,0.28)";
       ctx.lineWidth = 1 / dpr;
       ctx.lineCap = "butt";
@@ -1215,9 +1382,10 @@ export function draw(canvas, st) {
         ctx.stroke();
       }
       ctx.strokeStyle = "rgba(255,255,255,0.55)";
+      ctx.lineWidth = 1 / dpr;
       ctx.beginPath();
-      ctx.moveTo(outline[0].x, outline[0].y);
-      for (let i = 1; i < 4; i++) ctx.lineTo(outline[i].x, outline[i].y);
+      ctx.moveTo(face[0].x, face[0].y);
+      for (let i = 1; i < face.length; i++) ctx.lineTo(face[i].x, face[i].y);
       ctx.closePath();
       ctx.stroke();
       ctx.restore();

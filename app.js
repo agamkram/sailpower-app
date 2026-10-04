@@ -1,7 +1,5 @@
 import {
-  avgWatts,
   createState,
-  cycleWatts,
   defaultSpecs,
   fitError,
   holdForce,
@@ -10,8 +8,8 @@ import {
   sampleCycle,
   solvePlan,
   step,
-} from "./sim.js?v=174";
-import { draw, bindCam } from "./view.js?v=174";
+} from "./sim.js?v=188";
+import { draw, bindCam } from "./view.js?v=188";
 
 // v4: the tool opens on the 2×5 m sail already set to its best plan.
 // Older saves would put an unsolved controller back on screen.
@@ -32,7 +30,7 @@ let scrub = null;
 // does not change the digits and a real change shows up immediately.
 let postedW = null;
 let postedV = null;
-let postedAvg = null;
+let postedScore = "";
 
 const $ = (id) => document.getElementById(id);
 
@@ -207,39 +205,19 @@ function fmtW(w) {
   return sign + n.toLocaleString("en-US") + " W";
 }
 
-function fmtNet(watts) {
-  if (watts == null) return "net —";
-  return "net " + Math.round(watts).toLocaleString("en-US") + " W";
-}
-
 function paint() {
   const dur = cycle ? cycle.seconds : state.lastCycleS;
-  if (scrub != null) {
+  if (scrub != null || postedW == null || Math.abs(state.inst - postedW) >= 40) {
     postedW = state.inst;
-    postedV = state.vx;
-    $("speed").textContent = postedV.toFixed(1) + " m/s";
     $("watts").textContent = fmtW(postedW);
     $("watts").style.color = postedW >= 0 ? "var(--green)" : "var(--amber)";
-    $("net").textContent = (scrub * dur).toFixed(2) + " s";
-    $("substat").textContent = "";
-  } else {
-    if (postedW == null || Math.abs(state.inst - postedW) >= 40) {
-      postedW = state.inst;
-      $("watts").textContent = fmtW(postedW);
-      $("watts").style.color = postedW >= 0 ? "var(--green)" : "var(--amber)";
-    }
-    if (postedV == null || Math.abs(state.vx - postedV) >= 0.2) {
-      postedV = state.vx;
-      $("speed").textContent = postedV.toFixed(1) + " m/s";
-    }
-    const avg = avgWatts(state);
-    const label = fmtNet(avg);
-    if (label !== postedAvg) {
-      postedAvg = label;
-      $("net").textContent = label;
-      $("substat").textContent = "";
-    }
   }
+  if (scrub != null || postedV == null || Math.abs(state.vx - postedV) >= 0.2) {
+    postedV = state.vx;
+    const way = state.vx > 0.2 ? " out" : state.vx < -0.2 ? " home" : "";
+    $("speed").textContent = postedV.toFixed(1) + " m/s" + way;
+  }
+  paintScore();
   let frac;
   if (scrub != null) frac = scrub;
   else if (dur > 0) frac = Math.min(1, state.cycleT / dur);
@@ -247,203 +225,52 @@ function paint() {
   const pctAlong = Math.max(0, Math.min(100, frac * 100));
   $("map-dot").style.left = pctAlong + "%";
   $("track-map").setAttribute("aria-valuenow", Math.round(pctAlong));
-  paintGauge();
   draw($("view"), state);
 }
 
-/**
- * One round dial, as tall as its box. The top half is power: green is watts
- * being made, yellow is watts being used. The bottom half is speed. Straight
- * up and straight down are zero. Right is downwind, left is the return.
- * Each hand is scaled to its own hardest moment in the cycle, so that moment
- * reaches the end of its half.
- */
-function paintGauge() {
-  const canvas = $("gauge");
-  if (!canvas) return;
-  const dpr = Math.max(2, Math.min(3, window.devicePixelRatio || 1));
-  const w = canvas.clientWidth;
-  const h = canvas.clientHeight;
-  if (w < 2 || h < 2) return;
-  const pw = Math.floor(w * dpr);
-  const ph = Math.floor(h * dpr);
-  if (canvas.width !== pw || canvas.height !== ph) {
-    canvas.width = pw;
-    canvas.height = ph;
+/** The last finished trip. Until one has actually run, every line is zero. */
+function tripScore() {
+  if (state.cycles >= 1 && state.lastCycleS > 0) {
+    const t = state.lastCycleS;
+    return {
+      made: state.lastGen / t,
+      motor: state.lastMot / t,
+      slew: state.lastSlew / t,
+      loss: state.lastLoss / t,
+      stop: state.lastStop / t,
+      net: state.lastCycleNet / t,
+    };
   }
-  const ctx = canvas.getContext("2d");
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, w, h);
-
-  const frames = cycle && cycle.frames;
-  let scales = cycle && cycle.needles;
-  if (frames && frames.length > 1 && !scales) {
-    let genScale = 1;
-    let useScale = 1;
-    let outScale = 1;
-    let backScale = 1;
-    for (const f of frames) {
-      if (f.inst > genScale) genScale = f.inst;
-      if (f.inst < 0 && -f.inst > useScale) useScale = -f.inst;
-      if (f.vx > outScale) outScale = f.vx;
-      if (f.vx < 0 && -f.vx > backScale) backScale = -f.vx;
-    }
-    scales = { gen: genScale, use: useScale, out: outScale, back: backScale };
-    cycle.needles = scales;
-  }
-  if (!scales) scales = { gen: 1, use: 1, out: 1, back: 1 };
-  const genScale = scales.gen;
-  const useScale = scales.use;
-  const outScale = scales.out;
-  const backScale = scales.back;
-  const gen = Math.max(0, state.inst) / genScale;
-  const use = Math.max(0, -state.inst) / useScale;
-  const speed = state.vx >= 0 ? state.vx / outScale : state.vx / backScale;
-  const r = Math.max(8, h / 2 - 3);
-  drawRoundDial(ctx, r + 2, h / 2, r, gen, use, speed);
-  drawTotals(ctx, r * 2 + 16, h, w - r * 2 - 20, cycleTotals());
+  return { made: 0, motor: 0, slew: 0, loss: 0, stop: 0, net: 0 };
 }
 
-// Smoothed power of each ledger line. The cycle average left motor and slew
-// at 0 for the whole outbound, then showed them as a few dozen watts, so
-// they looked unwired. This is the power of that line right now.
-let termMark = null;
-let termSmooth = null;
-
-function liveTerms() {
-  const now = {
-    t: state.time,
-    made: state.gen,
-    motor: state.mot,
-    slew: state.slew,
-    loss: state.loss,
-    stop: state.stop,
-  };
-  if (!termMark || now.t < termMark.t - 1e-6) {
-    termMark = now;
-    termSmooth = null;
-    return null;
+function paintScore() {
+  const t = tripScore();
+  const parts = t
+    ? [
+        ["net", t.net],
+        ["t-made", t.made],
+        ["t-motor", -t.motor],
+        ["t-slew", -t.slew],
+        ["t-loss", -t.loss],
+        ["t-stop", -t.stop],
+      ]
+    : [
+        ["net", null],
+        ["t-made", null],
+        ["t-motor", null],
+        ["t-slew", null],
+        ["t-loss", null],
+        ["t-stop", null],
+      ];
+  const key = parts.map((p) => (p[1] == null ? "—" : Math.round(p[1]))).join("|");
+  if (key === postedScore) return;
+  postedScore = key;
+  for (const [id, watts] of parts) {
+    const el = $(id);
+    el.textContent = watts == null ? "—" : fmtW(watts);
+    if (id === "net") el.style.color = watts == null || watts >= 0 ? "var(--green)" : "var(--amber)";
   }
-  const dt = now.t - termMark.t;
-  if (dt < 1e-4) return termSmooth;
-  const raw = {
-    made: (now.made - termMark.made) / dt,
-    motor: (now.motor - termMark.motor) / dt,
-    slew: (now.slew - termMark.slew) / dt,
-    loss: (now.loss - termMark.loss) / dt,
-    stop: (now.stop - termMark.stop) / dt,
-  };
-  termMark = now;
-  const a = 1 - Math.exp(-dt / 0.12);
-  if (!termSmooth) termSmooth = { made: 0, motor: 0, slew: 0, loss: 0, stop: 0, net: 0 };
-  for (const k of Object.keys(raw)) termSmooth[k] += (raw[k] - termSmooth[k]) * a;
-  termSmooth.net = termSmooth.made - termSmooth.motor - termSmooth.slew - termSmooth.loss - termSmooth.stop;
-  return termSmooth;
-}
-
-/** Each line is that term's watts right now. They add up to the needle. */
-function cycleTotals() {
-  if (scrub != null && cycle && cycle.frames.length) {
-    const i = Math.round(scrub * (cycle.frames.length - 1));
-    const f = cycle.frames[i];
-    return f.rate || f.ledger || cycle.totals;
-  }
-  if (running || state.time > 0.05) return liveTerms() || cycleWatts(state) || (cycle && cycle.totals);
-  return (cycle && cycle.totals) || cycleWatts(state);
-}
-
-function drawTotals(ctx, x, h, width, totals) {
-  if (!totals || width < 72) return;
-  const rows = [
-    ["made", totals.made, "#34d399"],
-    ["motor", -totals.motor, "#ffe14a"],
-    ["slew", -totals.slew, "#ffe14a"],
-    ["loss", -totals.loss, "#9aa3b2"],
-    ["stops", -totals.stop, "#9aa3b2"],
-    ["net", totals.net, totals.net >= 0 ? "#34d399" : "#ffe14a"],
-  ];
-  const line = Math.min(13, h / rows.length);
-  let y = (h - line * rows.length) / 2 + line / 2;
-  ctx.font = "600 10px IBM Plex Mono, ui-monospace, monospace";
-  ctx.textBaseline = "middle";
-  for (const [name, watts, color] of rows) {
-    ctx.textAlign = "left";
-    ctx.fillStyle = "rgba(232,237,244,0.55)";
-    ctx.fillText(name, x, y);
-    ctx.textAlign = "right";
-    ctx.fillStyle = color;
-    const n = Math.round(watts);
-    ctx.fillText((n > 0 ? "+" : "") + n.toLocaleString("en-US"), x + width, y);
-    y += line;
-  }
-}
-
-/** Top half. -1 is left, 0 is up, 1 is right. */
-function powerAngle(t) {
-  const v = Math.max(-1, Math.min(1, t));
-  return Math.PI + ((v + 1) / 2) * Math.PI;
-}
-
-/** Bottom half. -1 is left, 0 is down, 1 is right. */
-function speedAngle(t) {
-  const v = Math.max(-1, Math.min(1, t));
-  return Math.PI / 2 - v * (Math.PI / 2);
-}
-
-function drawRoundDial(ctx, cx, cy, r, genIn, useIn, speed) {
-  const s = Math.max(-1, Math.min(1, speed));
-  const gen = Math.max(0, Math.min(1, genIn));
-  const use = Math.max(0, Math.min(1, useIn));
-  ctx.lineCap = "round";
-  ctx.beginPath();
-  ctx.arc(cx, cy, r, 0, Math.PI * 2);
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.16)";
-  ctx.lineWidth = 4;
-  ctx.stroke();
-  if (gen > 0.004) {
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 1.5 * Math.PI, powerAngle(gen), false);
-    ctx.strokeStyle = "#34d399";
-    ctx.lineWidth = 4;
-    ctx.stroke();
-  }
-  if (use > 0.004) {
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 1.5 * Math.PI, powerAngle(-use), true);
-    ctx.strokeStyle = "#ffe14a";
-    ctx.lineWidth = 4;
-    ctx.stroke();
-  }
-  ctx.beginPath();
-  ctx.arc(cx, cy, r, Math.PI / 2, speedAngle(s), s > 0);
-  ctx.strokeStyle = "#3d9cf5";
-  ctx.lineWidth = 4;
-  ctx.stroke();
-
-  const hand = (ang, len, color, width) => {
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.lineTo(cx + Math.cos(ang) * len, cy + Math.sin(ang) * len);
-    ctx.strokeStyle = color;
-    ctx.lineWidth = width;
-    ctx.stroke();
-  };
-  hand(speedAngle(s), r - 7, "#3d9cf5", 2);
-  hand(powerAngle(-use), r - 7, "#ffe14a", 1.75);
-  hand(powerAngle(gen), r - 7, "#34d399", 1.75);
-  ctx.beginPath();
-  ctx.arc(cx, cy, 2.6, 0, Math.PI * 2);
-  ctx.fillStyle = "#e8edf4";
-  ctx.fill();
-
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.font = "600 10px IBM Plex Mono, ui-monospace, monospace";
-  ctx.fillStyle = "#34d399";
-  ctx.fillText("W", cx - r * 0.34, cy - r * 0.28);
-  ctx.fillStyle = "#3d9cf5";
-  ctx.font = "600 9px IBM Plex Mono, ui-monospace, monospace";
-  ctx.fillText("m/s", cx - r * 0.2, cy + r * 0.36);
 }
 
 let raf = 0;

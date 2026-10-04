@@ -88,7 +88,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=IBM+Plex+Mono:wght@500;600&family=Michroma&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=174" />
+  <link rel="stylesheet" href="styles.css?v=188" />
 </head>
 <body>
   <div class="fit-stage" id="fit-stage">
@@ -98,8 +98,8 @@
       </header>
 
       <div class="stage-wrap">
-        <canvas id="view" aria-label="Wind cart on the rail. Drag to orbit, pinch or scroll to zoom, double-tap to reset."></canvas>
-        <p class="cam-hint" id="cam-hint">drag · pinch · double-tap reset</p>
+        <canvas id="view" aria-label="Sail on the rail. Drag to look around, shift-drag or two fingers to slide along the ground, pinch or scroll to zoom, double-tap to reset."></canvas>
+        <p class="cam-hint" id="cam-hint">drag orbits · shift-drag or two fingers slide</p>
         <p class="build-tag" id="build-tag" aria-hidden="true"></p>
         <div class="track-map" id="track-map" role="slider" tabindex="0"
              aria-label="Scrub through one cycle" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
@@ -109,14 +109,23 @@
 
       <div class="lower">
         <div class="deck-main" aria-live="polite">
-          <canvas id="gauge" class="gauge" aria-hidden="true"></canvas>
-          <div class="phase-row">
-            <span class="watts" id="watts">0 W</span>
-            <span class="speed" id="speed">0.0 m/s</span>
-          </div>
-          <div class="net-row">
-            <span class="net" id="net">net —</span>
-            <span class="substat" id="substat"></span>
+          <div class="readout">
+            <section class="now-col">
+              <h2>Now</h2>
+              <p class="big" id="watts">0 W</p>
+              <p class="sub" id="speed">0.0 m/s</p>
+            </section>
+            <section class="trip-col">
+              <h2>Trip</h2>
+              <p class="big" id="net">—</p>
+              <dl class="score-rows">
+                <div><dt>made</dt><dd id="t-made">—</dd></div>
+                <div><dt>motor</dt><dd id="t-motor">—</dd></div>
+                <div><dt>slew</dt><dd id="t-slew">—</dd></div>
+                <div><dt>loss</dt><dd id="t-loss">—</dd></div>
+                <div><dt>stops</dt><dd id="t-stop">—</dd></div>
+              </dl>
+            </section>
           </div>
           <p class="warn" id="warn"></p>
           <div class="actions">
@@ -124,7 +133,6 @@
             <button type="button" id="specs-btn">Specs</button>
           </div>
         </div>
-        <div class="deck-aside"></div>
       </div>
 
       <form class="sheet" id="sheet" hidden>
@@ -176,7 +184,7 @@
       </form>
     </div>
   </div>
-  <script type="module" src="app.js?v=174"></script>
+  <script type="module" src="app.js?v=188"></script>
   <script>
     window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
   </script>
