@@ -7,8 +7,8 @@ import {
   sampleCycle,
   solvePlan,
   step,
-} from "./sim.js?v=223";
-import { draw, bindCam } from "./view.js?v=223";
+} from "./sim.js?v=224";
+import { draw, bindCam } from "./view.js?v=224";
 
 // v4: the tool opens on the 2×5 m sail already set to its best plan.
 // Older saves would put an unsolved controller back on screen.
@@ -157,7 +157,9 @@ function paintForm() {
   $("o-turn").textContent = s.turn.toFixed(1) + " s";
   $("o-turnLead").textContent = leadText(s.turnLead);
   $("o-harvest").textContent = Math.round(s.harvest) + "% of the wind";
-  $("warn").textContent = fitError(s);
+  // A dead calm is a legal setting, not a broken one. Say so, rather than
+  // leaving every column on zero with nothing to explain it.
+  $("warn").textContent = fitError(s) || (s.wind > 0 ? "" : "No wind — nothing to harvest.");
   let off = false;
   for (const id of FIELDS) {
     const away = fieldOff(id, s[id]);
@@ -242,7 +244,9 @@ function scheduleSpan() {
 }
 
 function fmtW(w) {
-  const n = Math.round(w);
+  // Rounding a small negative gives -0, which prints as "-0 W" and reads like
+  // a fault. Nothing is nothing.
+  const n = Math.round(w) || 0;
   const sign = n > 0 ? "+" : "";
   return sign + n.toLocaleString("en-US") + " W";
 }
