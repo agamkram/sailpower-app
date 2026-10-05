@@ -415,8 +415,12 @@ function timeToRest(remaining, speed, brake) {
   // A standing cart is either already there or has not set off yet. Reading
   // both as "no time left" started the turn the instant each stroke launched,
   // which put a stray nudge on the sail at one cap and left the real turn to
-  // happen late at the other.
-  if (r <= 0.08) return 0;
+  // happen late at the other. Distance alone cannot tell the two apart, so
+  // this asks for the park speed as well: inside the last few centimetres
+  // and already down to a crawl is arrival. Reading the whole last 8 cm as
+  // arrival whatever the speed charged every setting a fixed 0.12 s of lead,
+  // which is a quarter of a half-second turn and most of a fast one.
+  if (r <= 0.08 && speed < 0.15) return 0;
   if (speed <= 0.05) return Infinity;
   return (r + Math.min(r, brake)) / speed;
 }
@@ -729,6 +733,22 @@ export function sampleCycle(specs, maxFrames = 5000) {
   for (const f of frames) {
     if ((f.phase === "back" || f.phase === "brakeBack") && -f.vx > homePeak) homePeak = -f.vx;
   }
+  // How far round the sail has actually come at the instant the cart is held,
+  // taken at whichever cap manages less. The lead slider asks for a fraction
+  // of the turn; the drive, the brake and the wind decide what it gets, and
+  // coming home the wind decides most of it.
+  const quarter = Math.PI / 2;
+  const arrival = (onLeg) => {
+    for (let i = 1; i < frames.length; i++) {
+      if (onLeg(frames[i - 1].phase) && !onLeg(frames[i].phase)) return frames[i].alpha;
+    }
+    return null;
+  };
+  const aOut = arrival((p) => p === "out" || p === "brakeOut");
+  const aHome = arrival((p) => p === "back" || p === "brakeBack");
+  const madeOut = aOut == null ? 1 : aOut / quarter;
+  const madeHome = aHome == null ? 1 : (quarter - aHome) / quarter;
+  const leadMade = clamp(Math.min(madeOut, madeHome), 0, 1);
   const T = st.lastCycleS;
   const totals = T > 0
     ? {
@@ -740,7 +760,7 @@ export function sampleCycle(specs, maxFrames = 5000) {
         net: st.lastCycleNet / T,
       }
     : null;
-  return { frames, seconds: frames.length * dt, span: peak + 1000, totals, homePeak };
+  return { frames, seconds: frames.length * dt, span: peak + 1000, totals, homePeak, leadMade };
 }
 
 /**
@@ -827,7 +847,10 @@ export function solvePlan(specs, msBudget = 2500) {
     ["outFrac", pick("outFrac", [0.15, 0.16, 0.2, 0.24, 0.28, 0.32, 0.36, 0.42, 0.5, 0.6])],
     ["vReturn", pick("vReturn", [1, 2, 4, 6, 8, 10, 12, 14, 16])],
     ["turn", pick("turn", [0.2, 0.3, 0.4, 0.5, 0.7, 1, 1.4, 2, 3])],
-    ["turnLead", pick("turnLead", [0, 0.15, 0.3, 0.45, 0.6, 0.8, 1])],
+    // Closely spaced below 0.6, because that is where the peak sits and it is
+    // a narrow one. Jumping 0.45 to 0.6 stepped over the best lead on both a
+    // half-second turn and a two-second one.
+    ["turnLead", pick("turnLead", [0, 0.15, 0.25, 0.35, 0.45, 0.55, 0.7, 0.85, 1])],
   ];
   for (let pass = 0; pass < (full ? 2 : 1) && !spent(); pass++) {
     for (const [key, values] of axes) {

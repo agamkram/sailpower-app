@@ -7,8 +7,8 @@ import {
   sampleCycle,
   solvePlan,
   step,
-} from "./sim.js?v=225";
-import { draw, bindCam } from "./view.js?v=225";
+} from "./sim.js?v=226";
+import { draw, bindCam } from "./view.js?v=226";
 
 // v4: the tool opens on the 2×5 m sail already set to its best plan.
 // Older saves would put an unsolved controller back on screen.
@@ -155,7 +155,7 @@ function paintForm() {
     Math.abs(frac - 1 / 3) < 0.012 ? "1/3 wind" : (frac * s.wind).toFixed(1) + " m/s";
   $("o-vReturn").textContent = returnText(s);
   $("o-turn").textContent = s.turn.toFixed(1) + " s";
-  $("o-turnLead").textContent = leadText(s.turnLead);
+  $("o-turnLead").textContent = leadText(s);
   $("o-harvest").textContent = Math.round(s.harvest) + "% of the wind";
   // A dead calm is a legal setting, not a broken one. Say so, rather than
   // leaving every column on zero with nothing to explain it.
@@ -169,19 +169,29 @@ function paintForm() {
   $("solve")?.classList.toggle("is-needed", off);
 }
 
-/** Where the 90° slew sits against arrival. 0 waits until the cart has stopped. */
-function leadText(v) {
-  const n = Number(v);
+/**
+ * Where the 90° slew sits against arrival. 0 waits until the cart has stopped.
+ * The setting is what the drive is asked for; `leadMade` is how far round the
+ * sail actually is when the cart is held, at whichever cap manages less.
+ * Coming home the wind sets that ceiling near three-quarters however early
+ * the turn starts, so the ask on its own would over-promise.
+ */
+function leadText(s) {
+  const n = Number(s.turnLead);
   const named = [
     [0, "Once stopped"],
     [0.3, "Mostly stopped"],
     [0.6, "While slowing"],
     [1, "Done on arrival"],
   ];
+  let out = Math.round(n * 100) + "% before the stop";
   for (const [at, label] of named) {
-    if (Math.abs(n - at) <= 0.026) return label;
+    if (Math.abs(n - at) <= 0.026) out = label;
   }
-  return Math.round(n * 100) + "% before the stop";
+  if (!cycle || !samePlan(s, specs)) return out;
+  const made = cycle.leadMade;
+  if (made == null) return out;
+  return out + " · " + Math.round(made * 100) + "% turned";
 }
 
 /** Commanded return, and the speed the cart actually reaches on the way home. */
@@ -236,6 +246,7 @@ function refreshSpan() {
   ensureCycle();
   const s = readForm();
   $("o-vReturn").textContent = returnText(s);
+  $("o-turnLead").textContent = leadText(s);
 }
 
 function scheduleSpan() {
