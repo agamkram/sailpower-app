@@ -7,8 +7,8 @@ import {
   sampleCycle,
   solvePlan,
   step,
-} from "./sim.js?v=222";
-import { draw, bindCam } from "./view.js?v=222";
+} from "./sim.js?v=223";
+import { draw, bindCam } from "./view.js?v=223";
 
 // v4: the tool opens on the 2×5 m sail already set to its best plan.
 // Older saves would put an unsolved controller back on screen.

@@ -783,8 +783,16 @@ export function score(specs, cycles = 2, dt = 0.02) {
  * Hunt for the outbound speed, return speed, slew time and lead that make
  * the most power. Coordinate descent: they interact, but weakly enough that
  * two passes land on the same answer as a full grid at a fraction of the cost.
+ *
+ * Bounded by the clock, not by the candidate count. A 40 m track crawled at
+ * 0.075 m/s takes nine minutes of simulated time per candidate, and seventy
+ * candidates of that is a minute of a phone sitting still. The axes are in
+ * order of what they are worth, so a search that runs out of time has already
+ * spent it on the settings that move the watts.
  */
-export function solvePlan(specs) {
+export function solvePlan(specs, msBudget = 2500) {
+  const started = Date.now();
+  const spent = () => Date.now() - started > msBudget;
   const lim = ranges(specs);
   const plan = {
     outFrac: specs.outFrac,
@@ -792,24 +800,39 @@ export function solvePlan(specs) {
     turn: clamp(specs.turn, lim.turn.min, lim.turn.max),
     turnLead: specs.turnLead,
   };
-  // Best may only offer plans the machine can carry out. It used to hand back
-  // a 0.2 s slew for a sail no drive could turn that fast.
-  const inside = (key, values) =>
-    values.filter((v) => v >= lim[key].min && v <= lim[key].max).concat(plan[key]);
-  const axes = [
-    ["outFrac", [0.15, 0.16, 0.2, 0.24, 0.28, 0.32, 0.36, 0.42, 0.5, 0.6]],
-    ["vReturn", inside("vReturn", [1, 2, 4, 6, 8, 10, 12, 14, 16])],
-    ["turn", inside("turn", [0.2, 0.3, 0.4, 0.5, 0.7, 1, 1.4, 2, 3])],
-    ["turnLead", [0, 0.15, 0.3, 0.45, 0.6, 0.8, 1]],
-  ];
   // The cycle is periodic from the first stroke, so one cycle at a coarser
   // step ranks candidates to within a watt. Searching at full resolution
   // took most of ten seconds on a slow machine.
   const rank = (p) => score({ ...specs, ...p }, 1, 0.05);
+  const probe = Date.now();
   let best = rank(plan) ?? -Infinity;
-  for (let pass = 0; pass < 2; pass++) {
+  // How many settings this machine can afford to try. A nine-minute cycle
+  // costs a third of a second to rank, so the full sweep would spend a
+  // minute. Thin every axis instead of sweeping the first one and running
+  // out of clock before the other three are touched.
+  const room = msBudget / Math.max(1, Date.now() - probe);
+  const full = room >= 80;
+  const per = full ? 99 : Math.max(2, Math.floor(room / 5));
+  // Thin what the machine can actually set, not the raw list, or a sail with
+  // a 10 m/s ceiling is offered 1 and 16 and ends up trying one of them.
+  // Best may only offer plans the machine can carry out: it used to hand back
+  // a 0.2 s slew for a sail no drive could turn that fast.
+  const pick = (key, values) => {
+    const legal = lim[key]
+      ? values.filter((v) => v >= lim[key].min && v <= lim[key].max)
+      : values;
+    return [...new Set(thin(legal, per).concat(plan[key]))];
+  };
+  const axes = [
+    ["outFrac", pick("outFrac", [0.15, 0.16, 0.2, 0.24, 0.28, 0.32, 0.36, 0.42, 0.5, 0.6])],
+    ["vReturn", pick("vReturn", [1, 2, 4, 6, 8, 10, 12, 14, 16])],
+    ["turn", pick("turn", [0.2, 0.3, 0.4, 0.5, 0.7, 1, 1.4, 2, 3])],
+    ["turnLead", pick("turnLead", [0, 0.15, 0.3, 0.45, 0.6, 0.8, 1])],
+  ];
+  for (let pass = 0; pass < (full ? 2 : 1) && !spent(); pass++) {
     for (const [key, values] of axes) {
       for (const v of values) {
+        if (spent()) break;
         const w = rank({ ...plan, [key]: v });
         if (w != null && w > best) {
           best = w;
@@ -818,5 +841,16 @@ export function solvePlan(specs) {
       }
     }
   }
-  return { ...plan, avgW: score({ ...specs, ...plan }) ?? best };
+  return { ...plan, avgW: score({ ...specs, ...plan }, full ? 2 : 1) ?? best };
+}
+
+/** At most `k` settings from a list, evenly spread, keeping both ends. */
+function thin(values, k) {
+  if (k >= values.length) return values;
+  if (k <= 1) return [values[0]];
+  const out = [];
+  for (let i = 0; i < k; i++) {
+    out.push(values[Math.round((i * (values.length - 1)) / (k - 1))]);
+  }
+  return [...new Set(out)];
 }
