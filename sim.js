@@ -10,15 +10,13 @@ export function defaultSpecs() {
     sailRho: 1.6,
     rho: 1.225,
     thickness: 0.006,
-    turn: 0.3,
+    turn: 0.5,
     turnLead: 0.45,
     vNoLoad: 22,
-    ironRef: 35,
     slewRegen: 0,
     vReturn: 10,
     outFrac: 0.24,
     harvest: 18,
-    cuMax: 120,
   });
 }
 
@@ -69,6 +67,15 @@ export function chassisMass(s, railN) {
 const ROLLING = 0.002;
 const DRIVE = 0.98;
 
+/**
+ * Copper and iron for the opening machine's 749 N rail. A bigger rail is a
+ * bigger motor, so both losses grow with the force it is built to hold.
+ * Leaving them fixed charged a 0.4 m² sail with a 120 W heater.
+ */
+const LOSS_REF_N = 749;
+const CU_AT_REF = 120;
+const IRON_AT_REF = 35;
+
 export function sizeMachine(s) {
   const push = holdForce(s);
   let mass = chassisMass(s, push);
@@ -76,7 +83,16 @@ export function sizeMachine(s) {
   let fMax = Math.max(push, rig({ ...s, mass }).total);
   mass = chassisMass(s, fMax);
   fMax = Math.max(push, rig({ ...s, mass }).total);
-  return { ...s, mass, fMax, crr: ROLLING, eta: DRIVE };
+  const scale = Math.max(0, fMax) / LOSS_REF_N;
+  return {
+    ...s,
+    mass,
+    fMax,
+    crr: ROLLING,
+    eta: DRIVE,
+    cuMax: CU_AT_REF * scale,
+    ironRef: IRON_AT_REF * scale,
+  };
 }
 
 /**
@@ -116,14 +132,18 @@ function approachYaw(s, vx) {
 /** Centre-of-pressure offset as a fraction of chord, for the slew torque. */
 const SLEW_CP = 0.1;
 
+/** Skin drag on sail area. Taken out of the harvest budget, not added on top. */
+const SKIN_CD = 0.008;
+
 /**
  * Everything that follows from the sail's shape rather than just its area.
  * Two sails of equal area behave differently: a wide one is far harder to yaw,
  * and a stubby one drags more air with it. The push itself is the harvest.
  *
- * cd       set by harvest. A drag device peaks at one-third of wind speed,
- *          where the share of the wind kept is Cd×4/27, so Cd is the
- *          harvest share times 27/4. There is no separate grabbiness.
+ * cd       face drag after skin has taken its share of the harvest budget.
+ *          A drag device peaks at one-third of wind speed, where the share
+ *          of the wind kept is Cd×4/27. The slider is that share, and skin
+ *          is inside it, so a sail set to 100% cannot take more than the wind.
  * inertia  yaw inertia about the vertical pivot, m*w^2/12. Scales with width
  *          squared, so this is what separates a 5x2 sail from a 2x5 one.
  * added    air entrained when the plate moves normal to itself. Conservative,
@@ -135,11 +155,13 @@ export function rig(s) {
   const chord = Math.min(s.plateW, s.plateH);
   const ar = Math.min(20, Math.max(1, chord > 0 ? span / chord : 1));
   const h = Math.max(0, s.harvest == null ? 18 : s.harvest) / 100;
-  const cd = h * (27 / 4);
+  const budget = h * (27 / 4);
+  const skin = Math.min(SKIN_CD, budget);
+  const cd = budget - skin;
   const sailMass = (s.sailRho ?? 1.6) * area;
   const inertia = (sailMass * s.plateW * s.plateW) / 12;
   const added = s.rho * (Math.PI / 4) * chord * chord * span * (1 - 0.42 / ar ** 0.8);
-  return { area, ar, cd, sailMass, total: s.mass + sailMass, inertia, added };
+  return { area, ar, cd, skin, sailMass, total: s.mass + sailMass, inertia, added };
 }
 
 /** Peak torque a real accelerate-then-decelerate slew would need, N m. */
@@ -349,7 +371,7 @@ export function aeroForce(s, vx, alpha) {
   const sn = Math.sin(alpha);
   const face = dir * q * r.cd * r.area * c * c;
   const edge = dir * q * 1.2 * (s.thickness * s.plateH) * sn * sn;
-  const skin = dir * q * 0.008 * r.area;
+  const skin = dir * q * r.skin * r.area;
   return face + edge + skin;
 }
 
@@ -469,17 +491,21 @@ function sub(st, dt) {
     st.alpha = Math.max(0, st.alpha - turnRate * dt);
   }
 
-  // Work the slew drive does. A real slew accelerates through the first
-  // half of the 90° and brakes through the second. The spin energy is
-  // spent across that first half, not dumped into one step; spin-down
-  // goes into the brake unless slewRegen buys it back onto the bus.
-  const dAlpha = Math.abs(st.alpha - alpha0);
+  // Work the slew drive does. The turn limit assumes the sail speeds up
+  // through the first 45° and slows through the second, so the peak rate is
+  // twice the steady rate that finishes the 90° in `turn` seconds, and the
+  // stored energy is four times a steady yaw. That energy is spent across
+  // the first half, not dumped into one step; spin-down goes into the brake
+  // unless slewRegen buys it back onto the bus.
+  const dAlphaSigned = st.alpha - alpha0;
+  const dAlpha = Math.abs(dAlphaSigned);
   const slewing = dAlpha > 1e-9;
-  const spinKE = 0.5 * rg.inertia * turnRate * turnRate;
+  const peakRate = Math.PI / turnSec;
+  const spinKE = 0.5 * rg.inertia * peakRate * peakRate;
   let slewE = 0;
   if (slewing) {
     const half = Math.PI / 4;
-    const accel = st.alpha > alpha0 ? st.alpha < half : st.alpha > half;
+    const accel = dAlphaSigned > 0 ? st.alpha < half : st.alpha > half;
     const share = dAlpha / half;
     if (accel) slewE += (spinKE / s.etaM) * share;
     else slewE -= spinKE * s.etaG * (s.slewRegen ?? 0) * share;
@@ -488,7 +514,12 @@ function sub(st, dt) {
     const lever = SLEW_CP * s.plateW;
     const tAero =
       q * rg.cd * rg.area * lever * Math.abs(Math.sin(st.alpha) * Math.cos(st.alpha));
-    slewE += (tAero * dAlpha) / s.etaM;
+    // The plate weathercocks toward edge-on. Yawing back toward the wind
+    // fights that moment and the drive pays for it. Yawing toward edge-on
+    // is helped; the brake absorbs it unless slew regen is on.
+    const regen = s.slewRegen ?? 0;
+    if (dAlphaSigned < 0) slewE += (tAero * dAlpha) / s.etaM;
+    else slewE -= tAero * dAlpha * s.etaG * regen;
   }
   st.slewing = slewing;
   st.slew += slewE;
@@ -576,7 +607,7 @@ function sub(st, dt) {
     st.mot += e;
     st.cycleMot += e;
   }
-  const cu = s.cuMax * (fCmd / s.fMax) ** 2;
+  const cu = s.fMax > 0 ? s.cuMax * (fCmd / s.fMax) ** 2 : 0;
   const iron = (s.ironRef ?? 35) * (st.vx / 10) ** 2;
   const eLoss = (cu + iron) * dt;
   st.loss += eLoss;
@@ -694,6 +725,10 @@ export function sampleCycle(specs, maxFrames = 5000) {
   }
   if (frames.length < 2) return null;
   const peak = sustainedPeak(frames.map((f) => f.inst));
+  let homePeak = 0;
+  for (const f of frames) {
+    if ((f.phase === "back" || f.phase === "brakeBack") && -f.vx > homePeak) homePeak = -f.vx;
+  }
   const T = st.lastCycleS;
   const totals = T > 0
     ? {
@@ -705,7 +740,7 @@ export function sampleCycle(specs, maxFrames = 5000) {
         net: st.lastCycleNet / T,
       }
     : null;
-  return { frames, seconds: frames.length * dt, span: peak + 1000, totals };
+  return { frames, seconds: frames.length * dt, span: peak + 1000, totals, homePeak };
 }
 
 /**
@@ -715,13 +750,15 @@ export function sampleCycle(specs, maxFrames = 5000) {
  * the tool should say so in watts rather than refusing to run it.
  */
 function cycleBudget(s) {
-  const out = s.track / Math.max(0.2, s.wind * s.outFrac);
-  const home = s.track / Math.max(0.2, Math.abs(s.vReturn));
-  const est = out + home + 4 * Math.max(0.15, s.turn) + 6;
-  // Bounded, or Best spends seconds chasing a machine nobody would build.
-  // The slowest real cycle in the slider space is a 40 m track crawled at
-  // 0.2 m/s, which is inside 400 s with room to spare.
-  return Math.min(400, Math.max(60, 2.5 * est));
+  const vOut = Math.abs((s.wind ?? 0) * (s.outFrac ?? 0));
+  // No wind means the cart never leaves. A short budget reports that as no
+  // plan instead of integrating a crawl that cannot start.
+  if (!(vOut > 1e-3)) return 60;
+  const vHome = Math.max(vOut, Math.abs(s.vReturn ?? 0));
+  const est = s.track / vOut + s.track / vHome + 4 * Math.max(0.15, s.turn) + 6;
+  // The slowest slider corner is a 40 m track at 0.075 m/s, about nine
+  // minutes outbound. 2.5× that still fits, so the corner reports watts.
+  return Math.min(1800, Math.max(60, 2.5 * est));
 }
 
 /** Average net watts over steady cycles. Returns null if it never settles. */
@@ -760,9 +797,9 @@ export function solvePlan(specs) {
   const inside = (key, values) =>
     values.filter((v) => v >= lim[key].min && v <= lim[key].max).concat(plan[key]);
   const axes = [
-    ["outFrac", [0.16, 0.2, 0.24, 0.28, 0.32, 0.36, 0.42, 0.5]],
-    ["vReturn", inside("vReturn", [4, 6, 8, 10, 12, 14, 16])],
-    ["turn", inside("turn", [0.2, 0.3, 0.4, 0.5, 0.7, 1, 1.4, 2])],
+    ["outFrac", [0.15, 0.16, 0.2, 0.24, 0.28, 0.32, 0.36, 0.42, 0.5, 0.6]],
+    ["vReturn", inside("vReturn", [1, 2, 4, 6, 8, 10, 12, 14, 16])],
+    ["turn", inside("turn", [0.2, 0.3, 0.4, 0.5, 0.7, 1, 1.4, 2, 3])],
     ["turnLead", [0, 0.15, 0.3, 0.45, 0.6, 0.8, 1]],
   ];
   // The cycle is periodic from the first stroke, so one cycle at a coarser

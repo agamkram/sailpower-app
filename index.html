@@ -88,7 +88,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=IBM+Plex+Mono:wght@500;600&family=Michroma&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=219" />
+  <link rel="stylesheet" href="styles.css?v=222" />
 </head>
 <body>
   <div class="fit-stage" id="fit-stage">
@@ -159,11 +159,11 @@
                 <span id="net">0 W</span>
                 <span id="l-net">0 W</span>
                 <span id="s-net">0 W</span>
-                <span class="lab">made</span>
+                <span class="lab" title="Electrical energy out of the coils, including braking regen of the sprint home">made</span>
                 <span id="t-made">0 W</span>
                 <span id="l-made">0 W</span>
                 <span id="s-made">0 W</span>
-                <span class="lab">motor</span>
+                <span class="lab" title="Electrical energy into the coils, including buying the sprint home">motor</span>
                 <span id="t-motor">0 W</span>
                 <span id="l-motor">0 W</span>
                 <span id="s-motor">0 W</span>
@@ -180,6 +180,7 @@
                 <span id="l-stop">0 W</span>
                 <span id="s-stop">0 W</span>
               </div>
+              <p class="trip-note">Made and motor both include the sprint home. Net is what stays.</p>
             </section>
           </div>
           <p class="warn" id="warn"></p>
@@ -217,6 +218,9 @@
         <label class="field">Turn <output id="o-turn"></output>
           <input id="turn" type="range" min="0.2" max="3" step="0.1" data-adaptive />
         </label>
+        <label class="field">Turn lead <output id="o-turnLead"></output>
+          <input id="turnLead" type="range" min="0" max="1" step="0.05" />
+        </label>
         <label class="field">Harvest <output id="o-harvest"></output>
           <input id="harvest" type="range" min="0" max="100" step="1" />
         </label>
@@ -228,7 +232,7 @@
       </form>
     </div>
   </div>
-  <script type="module" src="app.js?v=219"></script>
+  <script type="module" src="app.js?v=222"></script>
   <script>
     window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
   </script>

@@ -7,13 +7,13 @@ import {
   sampleCycle,
   solvePlan,
   step,
-} from "./sim.js?v=219";
-import { draw, bindCam } from "./view.js?v=219";
+} from "./sim.js?v=222";
+import { draw, bindCam } from "./view.js?v=222";
 
 // v4: the tool opens on the 2×5 m sail already set to its best plan.
 // Older saves would put an unsolved controller back on screen.
 const KEY = "sailpower-v1";
-const FIELDS = ["wind", "plateW", "plateH", "track", "outFrac", "vReturn", "turn", "harvest"];
+const FIELDS = ["wind", "plateW", "plateH", "track", "outFrac", "vReturn", "turn", "turnLead", "harvest"];
 
 let specs = loadSpecs();
 let lastBest = loadBest(specs);
@@ -153,8 +153,9 @@ function paintForm() {
   const frac = s.outFrac;
   $("o-outFrac").textContent =
     Math.abs(frac - 1 / 3) < 0.012 ? "1/3 wind" : (frac * s.wind).toFixed(1) + " m/s";
-  $("o-vReturn").textContent = s.vReturn.toFixed(1) + " m/s";
+  $("o-vReturn").textContent = returnText(s);
   $("o-turn").textContent = s.turn.toFixed(1) + " s";
+  $("o-turnLead").textContent = leadText(s.turnLead);
   $("o-harvest").textContent = Math.round(s.harvest) + "% of the wind";
   $("warn").textContent = fitError(s);
   let off = false;
@@ -164,6 +165,38 @@ function paintForm() {
     if (away) off = true;
   }
   $("solve")?.classList.toggle("is-needed", off);
+}
+
+/** Where the 90° slew sits against arrival. 0 waits until the cart has stopped. */
+function leadText(v) {
+  const n = Number(v);
+  const named = [
+    [0, "Once stopped"],
+    [0.3, "Mostly stopped"],
+    [0.6, "While slowing"],
+    [1, "Done on arrival"],
+  ];
+  for (const [at, label] of named) {
+    if (Math.abs(n - at) <= 0.026) return label;
+  }
+  return Math.round(n * 100) + "% before the stop";
+}
+
+/** Commanded return, and the speed the cart actually reaches on the way home. */
+function samePlan(a, b) {
+  if (!a || !b) return false;
+  for (const id of FIELDS) {
+    if (Math.abs(Number(a[id]) - Number(b[id])) > 1e-6) return false;
+  }
+  return true;
+}
+
+function returnText(s) {
+  const cmd = Number(s.vReturn).toFixed(1) + " m/s";
+  if (!cycle || !samePlan(s, specs)) return cmd;
+  const peak = cycle.homePeak;
+  if (!(peak > 0.05)) return cmd;
+  return cmd + ", peaks " + peak.toFixed(1);
 }
 
 function ensureCycle() {
@@ -199,6 +232,8 @@ function clearScrub() {
 
 function refreshSpan() {
   ensureCycle();
+  const s = readForm();
+  $("o-vReturn").textContent = returnText(s);
 }
 
 function scheduleSpan() {

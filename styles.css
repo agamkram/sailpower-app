@@ -343,7 +343,16 @@ header h1 {
   grid-row: 2;
   min-width: 0;
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.28rem;
+}
+
+.trip-note {
+  margin: 0;
+  font-size: 0.58rem;
+  line-height: 1.25;
+  color: var(--muted);
 }
 
 .trip-table {
